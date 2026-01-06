@@ -1,0 +1,31 @@
+{
+  "name": "bulk-page-generator",
+  "version": "1.0.0",
+  "description": "A simplified Confluence app for bulk copying and generating pages from existing templates",
+  "author": "Eric Huang",
+  "license": "MIT",
+  "main": "src/resolvers/index.js",
+  "scripts": {
+    "build": "forge deploy",
+    "dev": "forge tunnel",
+    "deploy": "forge deploy",
+    "install-app": "forge install",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@forge/api": "^6.1.1",
+    "@forge/bridge": "^5.2.0",
+    "@forge/resolver": "^1.6.15"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "eslint-plugin-react-hooks": "^4.6.0"
+  },
+  "keywords": [
+    "confluence",
+    "forge",
+    "bulk-generator",
+    "page-copy",
+    "atlassian"
+  ]
+}
