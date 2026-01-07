@@ -473,4 +473,16 @@ resolver.define('bulkGeneratePages', async (req) => {
   }
 });
 
+// Close modal function for Custom UI
+resolver.define('closeModal', async (req) => {
+  console.log('=== CLOSING MODAL ===');
+  try {
+    // For Custom UI modals, we'll return success and let the frontend handle the closing
+    return { success: true, action: 'close' };
+  } catch (error) {
+    console.error('❌ closeModal error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 export const handler = resolver.getDefinitions();

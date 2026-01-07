@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { invoke, router } from '@forge/bridge';
+import { invoke, router, view } from '@forge/bridge';
 
 const BulkPageGenerator = () => {
   const [spaces, setSpaces] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isPopupContext, setIsPopupContext] = useState(false);
+  const [showFullApp, setShowFullApp] = useState(false);
+  const [isMacroContext, setIsMacroContext] = useState(false);
   
   // Step management
   const [currentStep, setCurrentStep] = useState(1);
@@ -51,9 +54,30 @@ const BulkPageGenerator = () => {
   const [quarterlyTargetYear, setQuarterlyTargetYear] = useState(2025);
   const [quarterlyCount, setQuarterlyCount] = useState(2);
 
-  // Load all pages on component mount
+  // Load all pages and check context on component mount
   useEffect(() => {
-    loadAllPages();
+    let mounted = true;
+    const load = async () => {
+      if (!mounted) return;
+
+      try {
+        const context = await router.getContext();
+        const extType = context?.extension?.type;
+        // Check if this is a macro context
+        setIsMacroContext(extType === 'macro');
+        // Treat both macro and content action invocations as popups
+        setIsPopupContext(extType === 'macro' || extType === 'contentAction' || extType === 'confluence:contentAction');
+      } catch (err) {
+        // If context cannot be read, be conservative: no close button
+        setIsMacroContext(false);
+        setIsPopupContext(false);
+      }
+
+      await loadAllPages();
+    };
+
+    load();
+    return () => { mounted = false; };
   }, []);
 
   // Load all pages from all spaces
@@ -100,26 +124,30 @@ const BulkPageGenerator = () => {
     }
   };
 
-  // Filter pages based on search and space selection
+  // Filter pages based on search and space selection (memoized for performance)
   useEffect(() => {
-    let filtered = [...allPages];
+    const timeoutId = setTimeout(() => {
+      let filtered = allPages;
+      
+      // Filter by space
+      if (selectedSpaceFilter !== 'all') {
+        filtered = filtered.filter(page => page.spaceKey === selectedSpaceFilter);
+      }
+      
+      // Filter by search query
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        filtered = filtered.filter(page => 
+          page.title.toLowerCase().includes(query) ||
+          page.spaceKey.toLowerCase().includes(query) ||
+          page.spaceName.toLowerCase().includes(query)
+        );
+      }
     
-    // Filter by space
-    if (selectedSpaceFilter !== 'all') {
-      filtered = filtered.filter(page => page.spaceKey === selectedSpaceFilter);
-    }
+      setFilteredPages(filtered);
+    }, 300); // 300ms debounce for better performance
     
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(page => 
-        page.title.toLowerCase().includes(query) ||
-        page.spaceKey.toLowerCase().includes(query) ||
-        page.spaceName.toLowerCase().includes(query)
-      );
-    }
-    
-    setFilteredPages(filtered);
+    return () => clearTimeout(timeoutId);
   }, [allPages, searchQuery, selectedSpaceFilter]);
 
   // Handle page selection for template (Step 1)
@@ -217,15 +245,62 @@ const BulkPageGenerator = () => {
     setCurrentStep(3);
   };
 
+  const handleClose = async () => {
+    try {
+      await view.close();
+    } catch (error) {
+      console.error('Error closing view:', error);
+    }
+  };
+
   return (
     <div style={{ 
       padding: '20px', 
-      fontFamily: 'inherit',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
       width: '100%',
       maxWidth: 'none',
       boxSizing: 'border-box',
-      overflowX: 'hidden'
+      overflowX: 'hidden',
+      position: 'relative'
     }}>
+      {/* X Close Button - positioned in top-right corner */}
+      <button
+        onClick={handleClose}
+        style={{
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          width: '32px',
+          height: '32px',
+          backgroundColor: 'transparent',
+          border: '1px solid #DFE1E6',
+          borderRadius: '50%',
+          cursor: 'pointer',
+          fontSize: '16px',
+          fontWeight: 'bold',
+          color: '#6B778C',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          transition: 'all 0.2s ease',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
+        }}
+        onMouseEnter={(e) => {
+          e.target.style.backgroundColor = '#F4F5F7';
+          e.target.style.borderColor = '#B3B9C4';
+          e.target.style.color = '#172B4D';
+        }}
+        onMouseLeave={(e) => {
+          e.target.style.backgroundColor = 'transparent';
+          e.target.style.borderColor = '#DFE1E6';
+          e.target.style.color = '#6B778C';
+        }}
+        title="Close"
+      >
+        ✕
+      </button>
+      
       {/* Messages */}
       {error && (
         <div style={{
@@ -235,7 +310,7 @@ const BulkPageGenerator = () => {
           padding: '12px',
           borderRadius: '3px',
           marginBottom: '20px',
-          fontFamily: 'inherit'
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
         }}>
           {error}
         </div>
@@ -257,7 +332,7 @@ const BulkPageGenerator = () => {
             color: '#172B4D', 
             fontWeight: 'bold',
             fontSize: '22px',
-            fontFamily: 'inherit' 
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
           }}>
             📄 Select Page as Template
           </h3>
@@ -265,7 +340,7 @@ const BulkPageGenerator = () => {
           marginBottom: '16px', 
           color: 'black',
           fontSize: '15px', 
-          fontFamily: 'inherit' 
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
         }}>
           Browse and select any Confluence page to use as your template for bulk generation.
         </p>
@@ -277,7 +352,7 @@ const BulkPageGenerator = () => {
             marginBottom: '6px', 
             fontWeight: '600', 
             color: '#172B4D', 
-            fontFamily: 'inherit' 
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
           }}>
             🔍 Search Pages
           </label>
@@ -292,7 +367,7 @@ const BulkPageGenerator = () => {
               border: '1px solid #DFE1E6',
               borderRadius: '3px',
               fontSize: '14px',
-              fontFamily: 'inherit'
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
             }}
           />
         </div>
@@ -304,7 +379,7 @@ const BulkPageGenerator = () => {
             marginBottom: '6px', 
             fontWeight: '600', 
             color: '#172B4D', 
-            fontFamily: 'inherit' 
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
           }}>
             📁 Filter by Space
           </label>
@@ -318,7 +393,7 @@ const BulkPageGenerator = () => {
               border: '1px solid #DFE1E6',
               borderRadius: '3px',
               fontSize: '14px',
-              fontFamily: 'inherit'
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
             }}
           >
             <option value="all">All Spaces</option>
@@ -337,7 +412,7 @@ const BulkPageGenerator = () => {
             marginBottom: '6px', 
             fontWeight: '600', 
             color: '#172B4D', 
-            fontFamily: 'inherit' 
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
           }}>
             📝 Page Title
           </label>
@@ -352,7 +427,7 @@ const BulkPageGenerator = () => {
               border: '1px solid #DFE1E6',
               borderRadius: '3px',
               fontSize: '14px',
-              fontFamily: 'inherit',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
               boxSizing: 'border-box'
             }}
           />
@@ -363,7 +438,12 @@ const BulkPageGenerator = () => {
           color: 'black',
           fontWeight: 'bold', 
           fontSize: '14px', 
-          fontFamily: 'inherit' 
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
+          backgroundColor: '#FFFAE6',
+          padding: '8px 12px',
+          borderRadius: '4px',
+          border: '1px solid #FFC400',
+          display: 'inline-block'
         }}>
           📄 Found {filteredPages.length} pages
         </div>
@@ -374,7 +454,7 @@ const BulkPageGenerator = () => {
             textAlign: 'center', 
             padding: '40px', 
             color: '#6B778C', 
-            fontFamily: 'inherit' 
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
           }}>
             Loading pages...
           </div>
@@ -396,7 +476,7 @@ const BulkPageGenerator = () => {
                   textAlign: 'left', 
                   fontWeight: '600', 
                   color: '#172B4D', 
-                  fontFamily: 'inherit',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                   width: '35%',
                   wordWrap: 'break-word'
                 }}>
@@ -407,7 +487,7 @@ const BulkPageGenerator = () => {
                   textAlign: 'left', 
                   fontWeight: '600', 
                   color: '#172B4D', 
-                  fontFamily: 'inherit',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                   width: '30%'
                 }}>
                   Space
@@ -417,7 +497,7 @@ const BulkPageGenerator = () => {
                   textAlign: 'left', 
                   fontWeight: '600', 
                   color: '#172B4D', 
-                  fontFamily: 'inherit',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                   width: '20%'
                 }}>
                   Last Modified
@@ -427,7 +507,7 @@ const BulkPageGenerator = () => {
                   textAlign: 'center', 
                   fontWeight: '600', 
                   color: '#172B4D', 
-                  fontFamily: 'inherit',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                   width: '15%'
                 }}>
                   Action
@@ -441,7 +521,7 @@ const BulkPageGenerator = () => {
                     padding: '20px', 
                     textAlign: 'center', 
                     color: 'black', 
-                    fontFamily: 'inherit' 
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
                   }}>
                     {searchQuery || selectedSpaceFilter !== 'all' 
                       ? 'No pages found matching your search criteria.'
@@ -455,7 +535,7 @@ const BulkPageGenerator = () => {
                     <td style={{ 
                       padding: '12px', 
                       color: 'black', 
-                      fontFamily: 'inherit',
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                       wordWrap: 'break-word',
                       overflowWrap: 'break-word'
                     }}>
@@ -465,7 +545,7 @@ const BulkPageGenerator = () => {
                       padding: '12px', 
                       color: 'black', 
                       fontSize: '14px', 
-                      fontFamily: 'inherit',
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                       wordWrap: 'break-word',
                       overflowWrap: 'break-word'
                     }}>
@@ -475,7 +555,7 @@ const BulkPageGenerator = () => {
                       padding: '12px', 
                       color: 'black', 
                       fontSize: '14px', 
-                      fontFamily: 'inherit',
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                       wordWrap: 'break-word'
                     }}>
                       {page.lastModified || 'Unknown'}
@@ -492,7 +572,7 @@ const BulkPageGenerator = () => {
                           borderRadius: '3px',
                           fontSize: '14px',
                           cursor: loading ? 'not-allowed' : 'pointer',
-                          fontFamily: 'inherit'
+                          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                         }}
                       >
                         Select
@@ -523,7 +603,7 @@ const BulkPageGenerator = () => {
             color: '#172B4D', 
             fontWeight: 'bold',
             fontSize: '22px',
-            fontFamily: 'inherit',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
             display: 'flex',
             alignItems: 'center',
             gap: '8px'
@@ -540,7 +620,7 @@ const BulkPageGenerator = () => {
               marginBottom: '20px',
               fontSize: '14px',
               color: '#006644',
-              fontFamily: 'inherit'
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
             }}>
               ✅ Template: <strong>{selectedTemplate.name || selectedTemplate.sourcePageTitle}</strong> | NEW Page Title: <strong>{pageTitle || '(not entered)'}</strong>
             </div>
@@ -559,7 +639,7 @@ const BulkPageGenerator = () => {
                 fontWeight: 'bold',
                 color: '#172B4D',
                 marginBottom: '4px',
-                fontFamily: 'inherit'
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
                 📁 Select Confluence Space
               </label>
@@ -567,7 +647,7 @@ const BulkPageGenerator = () => {
                 margin: '0 0 12px 0', 
                 fontSize: '14px', 
                 color: '#172B4D',
-                fontFamily: 'inherit' 
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
               }}>
                 Choose the Confluence space where your reports will be created.
               </p>
@@ -583,7 +663,7 @@ const BulkPageGenerator = () => {
                   border: '1px solid #0052CC',
                   borderRadius: '3px',
                   fontSize: '14px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}
               >
                 <option value="">Select a space...</option>
@@ -612,7 +692,7 @@ const BulkPageGenerator = () => {
                   fontWeight: 'bold',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   <span>📄</span> Page Organization
                 </label>
@@ -620,7 +700,7 @@ const BulkPageGenerator = () => {
                   margin: '0 0 16px 0', 
                   fontSize: '14px', 
                   color: 'black',
-                  fontFamily: 'inherit' 
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
                 }}>
                   Choose how you want to organize your reports in the selected space.
                 </p>
@@ -638,10 +718,10 @@ const BulkPageGenerator = () => {
                     style={{ marginTop: '3px' }}
                   />
                   <div>
-                    <div style={{ fontWeight: '600', color: '#172B4D', fontFamily: 'inherit' }}>
+                    <div style={{ fontWeight: '600', color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                       📁 Create child(s) page under an existing parent page
                     </div>
-                    <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: 'inherit' }}>
+                    <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                       Select an existing page to organize your reports underneath it
                     </div>
                   </div>
@@ -663,10 +743,10 @@ const BulkPageGenerator = () => {
                     style={{ marginTop: '3px' }}
                   />
                   <div>
-                    <div style={{ fontWeight: '600', color: '#172B4D', fontFamily: 'inherit' }}>
+                    <div style={{ fontWeight: '600', color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                       📄 Create as a parent page under '{spaces.find(s => s.key === selectedSpace)?.name}'
                     </div>
-                    <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: 'inherit' }}>
+                    <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                       Reports will be created directly in the space as top-level pages
                     </div>
                   </div>
@@ -685,10 +765,10 @@ const BulkPageGenerator = () => {
                     style={{ marginTop: '3px' }}
                   />
                   <div>
-                    <div style={{ fontWeight: '600', color: '#172B4D', fontFamily: 'inherit' }}>
+                    <div style={{ fontWeight: '600', color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                       📁 Create new parent and child page
                     </div>
-                    <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: 'inherit' }}>
+                    <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                       Create a new parent page, then generate reports as child pages under it
                     </div>
                   </div>
@@ -713,7 +793,7 @@ const BulkPageGenerator = () => {
                 fontWeight: 'bold',
                 color: '#172B4D',
                 marginBottom: '8px',
-                fontFamily: 'inherit'
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
                 <span>📄</span> Select Existing Parent Page
               </label>
@@ -721,12 +801,12 @@ const BulkPageGenerator = () => {
                 margin: '0 0 12px 0', 
                 fontSize: '13px', 
                 color: '#172B4D',
-                fontFamily: 'inherit' 
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
               }}>
                 Choose the parent page under which your report child pages will be created. We list only the pages that are direct children of the space homepage.
               </p>
               {loadingSpacePages ? (
-                <div style={{ padding: '12px', textAlign: 'center', color: '#6B778C', fontFamily: 'inherit' }}>
+                <div style={{ padding: '12px', textAlign: 'center', color: '#6B778C', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                   Loading pages...
                 </div>
               ) : (
@@ -739,7 +819,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #FFC400',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   <option value="">Select a parent page...</option>
@@ -767,7 +847,7 @@ const BulkPageGenerator = () => {
                 fontWeight: 'bold',
                 color: '#172B4D',
                 marginBottom: '8px',
-                fontFamily: 'inherit'
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
                 📁 New Parent Page Title
               </label>
@@ -775,7 +855,7 @@ const BulkPageGenerator = () => {
                 margin: '0 0 12px 0', 
                 fontSize: '13px', 
                 color: '#172B4D',
-                fontFamily: 'inherit' 
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
               }}>
                 Enter the title for the new parent page that will contain your report pages.
               </p>
@@ -790,7 +870,7 @@ const BulkPageGenerator = () => {
                   border: '1px solid #00B8D9',
                   borderRadius: '3px',
                   fontSize: '14px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}
               />
             </div>
@@ -811,7 +891,7 @@ const BulkPageGenerator = () => {
                 borderRadius: '3px',
                 fontSize: '14px',
                 cursor: 'pointer',
-                fontFamily: 'inherit',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                 textDecoration: 'underline'
               }}
             >
@@ -844,7 +924,7 @@ const BulkPageGenerator = () => {
                   (pageOrganization === 'create-child' && !selectedParentPage) ||
                   (pageOrganization === 'create' && !newParentTitle.trim())) 
                   ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit'
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}
             >
               Bulk Generate
@@ -869,7 +949,7 @@ const BulkPageGenerator = () => {
             color: '#172B4D', 
             fontWeight: 'bold',
             fontSize: '22px',
-            fontFamily: 'inherit',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
             display: 'flex',
             alignItems: 'center',
             gap: '8px'
@@ -881,7 +961,7 @@ const BulkPageGenerator = () => {
             marginBottom: '20px', 
             color: 'black',
             fontSize: '14px', 
-            fontFamily: 'inherit' 
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
           }}>
             Bulk page generation allows you to create multiple pages with various date formats (weekly, monthly, quarterly) or numbered sequences within a specific timeframe, perfect for comprehensive content organization and analysis.
           </p>
@@ -895,7 +975,7 @@ const BulkPageGenerator = () => {
               marginBottom: '20px',
               fontSize: '14px',
               color: '#006644',
-              fontFamily: 'inherit'
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
             }}>
               ✅ Template: <strong>{selectedTemplate.name || selectedTemplate.sourcePageTitle}</strong> | Page Title: <strong>{pageTitle}</strong> | Space: <strong>{spaces.find(s => s.key === selectedSpace)?.name}</strong>
             </div>
@@ -916,7 +996,7 @@ const BulkPageGenerator = () => {
                 fontWeight: 'bold',
                 color: '#172B4D',
                 marginBottom: '8px',
-                fontFamily: 'inherit'
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
                 <span>📅</span> Date Format Selection
               </label>
@@ -924,7 +1004,7 @@ const BulkPageGenerator = () => {
                 margin: '0 0 16px 0', 
                 fontSize: '14px', 
                 color: 'black',
-                fontFamily: 'inherit' 
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
               }}>
                 Choose your page generation mode: create a single page, generate multiple numbered pages, or create date-based pages (weekly, monthly, quarterly). Numbered pages are perfect for creating template sets or multiple versions without date constraints.
               </p>
@@ -938,7 +1018,7 @@ const BulkPageGenerator = () => {
                 fontWeight: 'bold',
                 color: '#172B4D',
                 marginBottom: '12px',
-                fontFamily: 'inherit'
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
                 <span>📅</span> Page Generation Mode
               </label>
@@ -956,7 +1036,7 @@ const BulkPageGenerator = () => {
                   style={{ marginTop: '3px' }}
                 />
                 <div>
-                  <div style={{ color: '#172B4D', fontFamily: 'inherit' }}>
+                  <div style={{ color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                     📄 Single Page (No Date)
                   </div>
                 </div>
@@ -975,7 +1055,7 @@ const BulkPageGenerator = () => {
                   style={{ marginTop: '3px' }}
                 />
                 <div>
-                  <div style={{ color: '#172B4D', fontFamily: 'inherit' }}>
+                  <div style={{ color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                     🔢 Bulk Numbered Pages (e.g., Marketing Page (1), Marketing Page (2))
                   </div>
                 </div>
@@ -994,7 +1074,7 @@ const BulkPageGenerator = () => {
                   style={{ marginTop: '3px' }}
                 />
                 <div>
-                  <div style={{ color: '#172B4D', fontFamily: 'inherit' }}>
+                  <div style={{ color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                     📅 Weekly Date Format (e.g., 'August 9, 2025')
                   </div>
                 </div>
@@ -1013,7 +1093,7 @@ const BulkPageGenerator = () => {
                   style={{ marginTop: '3px' }}
                 />
                 <div>
-                  <div style={{ color: '#172B4D', fontFamily: 'inherit' }}>
+                  <div style={{ color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                     📆 Monthly Date Format (e.g., 'August 2025')
                   </div>
                 </div>
@@ -1032,7 +1112,7 @@ const BulkPageGenerator = () => {
                   style={{ marginTop: '3px' }}
                 />
                 <div>
-                  <div style={{ color: '#172B4D', fontFamily: 'inherit' }}>
+                  <div style={{ color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                     📆 Quarterly Date Format (e.g., 'Q1 2025')
                   </div>
                 </div>
@@ -1056,7 +1136,7 @@ const BulkPageGenerator = () => {
                   fontWeight: 'bold',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   <span>🔢</span> Numbered Pages Configuration
                 </label>
@@ -1064,7 +1144,7 @@ const BulkPageGenerator = () => {
                   margin: '0 0 16px 0', 
                   fontSize: '14px', 
                   color: 'black',
-                  fontFamily: 'inherit' 
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
                 }}>
                   Generate multiple pages with numbered titles to prevent duplicates. Perfect for creating template sets or multiple versions.
                 </p>
@@ -1076,7 +1156,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Number of Pages to Generate
                 </label>
@@ -1089,7 +1169,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #DFE1E6',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   {[...Array(20)].map((_, i) => (
@@ -1100,7 +1180,7 @@ const BulkPageGenerator = () => {
                   margin: '8px 0 0 0', 
                   fontSize: '13px', 
                   color: '#6B778C',
-                  fontFamily: 'inherit' 
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
                 }}>
                   Pages will be named: "{pageTitle} (1)", "{pageTitle} (2)", etc.
                 </p>
@@ -1112,10 +1192,10 @@ const BulkPageGenerator = () => {
                 borderRadius: '3px',
                 marginTop: '12px'
               }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#006644', fontFamily: 'inherit' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                   📝 Preview:
                 </div>
-                <p style={{ margin: 0, fontSize: '13px', color: '#006644', fontFamily: 'inherit' }}>
+                <p style={{ margin: 0, fontSize: '13px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                   • {pageTitle} (1) • {pageTitle} (2) • {pageTitle} (3) ... and {numberedCount - 3} more
                 </p>
               </div>
@@ -1138,7 +1218,7 @@ const BulkPageGenerator = () => {
                   fontWeight: 'bold',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   <span>📅</span> Weekly Page Configuration
                 </label>
@@ -1150,7 +1230,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Start Month & Day
                 </label>
@@ -1158,7 +1238,7 @@ const BulkPageGenerator = () => {
                   margin: '0 0 8px 0', 
                   fontSize: '13px', 
                   color: 'black',
-                  fontFamily: 'inherit' 
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
                 }}>
                   Choose the starting month and day for your first weekly page.
                 </p>
@@ -1172,7 +1252,7 @@ const BulkPageGenerator = () => {
                       border: '1px solid #DFE1E6',
                       borderRadius: '3px',
                       fontSize: '14px',
-                      fontFamily: 'inherit'
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                     }}
                   >
                     {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(month => (
@@ -1188,7 +1268,7 @@ const BulkPageGenerator = () => {
                       border: '1px solid #DFE1E6',
                       borderRadius: '3px',
                       fontSize: '14px',
-                      fontFamily: 'inherit'
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                     }}
                   >
                     {[...Array(31)].map((_, i) => (
@@ -1204,7 +1284,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Start Year
                 </label>
@@ -1217,7 +1297,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #DFE1E6',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   {[2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035, 2036, 2037, 2038, 2039, 2040].map(year => (
@@ -1232,7 +1312,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Number of Pages to Generate
                 </label>
@@ -1245,7 +1325,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #DFE1E6',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   {[...Array(52)].map((_, i) => (
@@ -1256,7 +1336,7 @@ const BulkPageGenerator = () => {
                   margin: '8px 0 0 0', 
                   fontSize: '13px', 
                   color: '#6B778C',
-                  fontFamily: 'inherit' 
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
                 }}>
                   Number of weekly pages to generate (e.g., {weeklyCount} pages = {weeklyCount} consecutive weeks)
                 </p>
@@ -1268,10 +1348,10 @@ const BulkPageGenerator = () => {
                 borderRadius: '3px',
                 marginTop: '12px'
               }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#006644', fontFamily: 'inherit' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                   📅 Date Preview:
                 </div>
-                <p style={{ margin: 0, fontSize: '13px', color: '#006644', fontFamily: 'inherit' }}>
+                <p style={{ margin: 0, fontSize: '13px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                   • Week of {weeklyStartMonth} {weeklyStartDay}, {weeklyStartYear} • Week of {weeklyStartMonth} {weeklyStartDay + 7}, {weeklyStartYear} ... and {weeklyCount - 2} more weeks
                 </p>
               </div>
@@ -1294,7 +1374,7 @@ const BulkPageGenerator = () => {
                   fontWeight: 'bold',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   <span>📆</span> Monthly Page Configuration
                 </label>
@@ -1306,7 +1386,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Target Month
                 </label>
@@ -1319,7 +1399,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #DFE1E6',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(month => (
@@ -1334,7 +1414,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Target Year
                 </label>
@@ -1347,7 +1427,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #DFE1E6',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   {[2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035, 2036, 2037, 2038, 2039, 2040].map(year => (
@@ -1362,7 +1442,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Number of Pages to Generate
                 </label>
@@ -1375,7 +1455,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #DFE1E6',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   {[...Array(24)].map((_, i) => (
@@ -1386,7 +1466,7 @@ const BulkPageGenerator = () => {
                   margin: '8px 0 0 0', 
                   fontSize: '13px', 
                   color: '#6B778C',
-                  fontFamily: 'inherit' 
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
                 }}>
                   Number of monthly pages to generate (e.g., {monthlyCount} pages = next {monthlyCount} months)
                 </p>
@@ -1398,16 +1478,16 @@ const BulkPageGenerator = () => {
                 borderRadius: '3px',
                 marginTop: '12px'
               }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#006644', fontFamily: 'inherit' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                   📅 Page Date Format Preview
                 </div>
-                <p style={{ margin: '0 0 4px 0', fontSize: '13px', color: '#006644', fontFamily: 'inherit' }}>
+                <p style={{ margin: '0 0 4px 0', fontSize: '13px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                   Dates will be formatted as: "January 5, 2026"
                 </p>
-                <p style={{ margin: 0, fontSize: '13px', color: '#006644', fontFamily: 'inherit', fontWeight: 'bold' }}>
+                <p style={{ margin: 0, fontSize: '13px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif', fontWeight: 'bold' }}>
                   📊 Page title format: "{pageTitle} - {monthlyTargetMonth} {monthlyTargetYear}"
                 </p>
-                <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#006644', fontFamily: 'inherit' }}>
+                <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                   📊 Will generate {monthlyCount} monthly pages
                 </p>
               </div>
@@ -1430,7 +1510,7 @@ const BulkPageGenerator = () => {
                   fontWeight: 'bold',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   <span>📆</span> Quarterly Page Configuration
                 </label>
@@ -1442,7 +1522,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Quarter Start Month
                 </label>
@@ -1450,7 +1530,7 @@ const BulkPageGenerator = () => {
                   margin: '0 0 8px 0', 
                   fontSize: '13px', 
                   color: 'black',
-                  fontFamily: 'inherit' 
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
                 }}>
                   Fiscal Year: Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
                 </p>
@@ -1463,7 +1543,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #DFE1E6',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(month => (
@@ -1478,7 +1558,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Select Quarter To Start On
                 </label>
@@ -1491,7 +1571,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #DFE1E6',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   {['Q1', 'Q2', 'Q3', 'Q4'].map(quarter => (
@@ -1506,7 +1586,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Target Year
                 </label>
@@ -1519,7 +1599,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #DFE1E6',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   {[2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035, 2036, 2037, 2038, 2039, 2040].map(year => (
@@ -1534,7 +1614,7 @@ const BulkPageGenerator = () => {
                   fontWeight: '600',
                   color: '#172B4D',
                   marginBottom: '8px',
-                  fontFamily: 'inherit'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
                   Number of Pages to Generate
                 </label>
@@ -1547,7 +1627,7 @@ const BulkPageGenerator = () => {
                     border: '1px solid #DFE1E6',
                     borderRadius: '3px',
                     fontSize: '14px',
-                    fontFamily: 'inherit'
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                   }}
                 >
                   {[...Array(12)].map((_, i) => (
@@ -1558,7 +1638,7 @@ const BulkPageGenerator = () => {
                   margin: '8px 0 0 0', 
                   fontSize: '13px', 
                   color: '#6B778C',
-                  fontFamily: 'inherit' 
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
                 }}>
                   Number of quarterly pages to generate (e.g., {quarterlyCount} pages = next {quarterlyCount} quarters)
                 </p>
@@ -1570,13 +1650,13 @@ const BulkPageGenerator = () => {
                 borderRadius: '3px',
                 marginTop: '12px'
               }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#006644', fontFamily: 'inherit' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                   📅 Page Date Format Preview
                 </div>
-                <p style={{ margin: '0 0 4px 0', fontSize: '13px', color: '#006644', fontFamily: 'inherit' }}>
+                <p style={{ margin: '0 0 4px 0', fontSize: '13px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                   Dates will be formatted as: "January 5, 2026"
                 </p>
-                <p style={{ margin: 0, fontSize: '13px', color: '#006644', fontFamily: 'inherit', fontWeight: 'bold' }}>
+                <p style={{ margin: 0, fontSize: '13px', color: '#006644', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif', fontWeight: 'bold' }}>
                   📊 Page title format: "{pageTitle} - {quarterlyStartQuarter} {quarterlyTargetYear}"
                 </p>
               </div>
@@ -1598,7 +1678,7 @@ const BulkPageGenerator = () => {
                 fontWeight: 'bold',
                 color: '#172B4D',
                 marginBottom: '8px',
-                fontFamily: 'inherit'
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
                 <span>📅</span> Date & Timestamp Configuration
               </label>
@@ -1606,7 +1686,7 @@ const BulkPageGenerator = () => {
                 margin: '0', 
                 fontSize: '14px', 
                 color: 'black',
-                fontFamily: 'inherit' 
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
               }}>
                 <strong>Page Dates</strong> and <strong>Show Last Updated</strong> will automatically be included in your pages
               </p>
@@ -1628,7 +1708,7 @@ const BulkPageGenerator = () => {
                 borderRadius: '3px',
                 fontSize: '14px',
                 cursor: 'pointer',
-                fontFamily: 'inherit',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                 textDecoration: 'underline'
               }}
             >
@@ -1695,7 +1775,7 @@ const BulkPageGenerator = () => {
                 fontSize: '14px',
                 fontWeight: '600',
                 cursor: generating ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit'
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}
             >
               {generating ? 'Creating Pages...' : 'Create Pages'}
@@ -1806,7 +1886,7 @@ const BulkPageGenerator = () => {
               fontSize: '14px',
               fontWeight: '500',
               cursor: 'pointer',
-              fontFamily: 'inherit'
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
             }}
           >
             Create Another Page
