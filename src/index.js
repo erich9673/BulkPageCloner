@@ -98,12 +98,14 @@ resolver.define('getSpacePages', async (req) => {
       }
       
       const data = await response.json();
-      const newPages = (data.results || []).map(page => ({
-        id: page.id,
-        title: page.title,
-        spaceKey: spaceKey || identifier,
-        lastModified: page.version?.when || page.createdAt || 'Unknown'
-      }));
+      const newPages = (data.results || [])
+        .filter(page => page.title !== actualSpaceKey) // Filter out space names
+        .map(page => ({
+          id: page.id,
+          title: page.title,
+          spaceKey: spaceKey || identifier,
+          lastModified: page.version?.when || page.createdAt || 'Unknown'
+        }));
       
       allPages = allPages.concat(newPages);
       console.log(`✅ Successfully got ${newPages.length} pages in batch ${fetchCount + 1} (total: ${allPages.length})`);
@@ -133,6 +135,437 @@ resolver.define('getSpacePages', async (req) => {
   }
 });
 
+// ============================================================================
+// OPTIMIZED ALL PAGES LOADER - NEW EFFICIENT APPROACH
+// ============================================================================
+
+// Get all pages from all spaces efficiently with unlimited pagination (BRG pattern)
+resolver.define('getAllPagesOptimized', async (req) => {
+  console.log('=== FETCHING ALL PAGES OPTIMIZED (BRG PATTERN) ===');
+  try {
+    // First get ALL spaces with unlimited pagination
+    let spaces = [];
+    let start = 0;
+    const limit = 250; // Maximum batch size for efficiency
+    let more = true;
+    let fetchCount = 0;
+    
+    console.log('📡 Fetching all spaces with unlimited pagination...');
+    while (more) {
+      console.log(`🔍 Fetching spaces batch ${fetchCount + 1}, start: ${start}, limit: ${limit}`);
+      
+      const spacesResponse = await api.asUser().requestConfluence(route`/wiki/api/v2/spaces?limit=${limit}&start=${start}`);
+      
+      if (!spacesResponse.ok) {
+        console.log('Spaces API error:', spacesResponse.status, await spacesResponse.text());
+        throw new Error(`Spaces API failed: ${spacesResponse.status}`);
+      }
+      
+      const spacesData = await spacesResponse.json();
+      const newSpaces = (spacesData.results || []).map(space => ({
+        key: space.key,
+        name: space.name,
+        type: space.type,
+        status: space.status,
+        id: space.id
+      }));
+      
+      spaces = spaces.concat(newSpaces);
+      console.log(`✅ Successfully got ${newSpaces.length} spaces in batch ${fetchCount + 1} (total: ${spaces.length})`);
+      
+      // Continue pagination until no more spaces
+      if (spacesData._links && spacesData._links.next && newSpaces.length > 0) {
+        start += limit;
+        fetchCount++;
+        console.log(`➡️ More spaces available, continuing to batch ${fetchCount + 1}...`);
+      } else {
+        more = false;
+        console.log(`🏁 Reached end of spaces, fetching complete`);
+      }
+      
+      // Safety check: if we get an empty batch, stop
+      if (newSpaces.length === 0) {
+        console.log(`⚠️ Empty batch received, stopping pagination`);
+        more = false;
+      }
+    }
+    
+    console.log(`📊 Total spaces found: ${spaces.length}`);
+    
+    // Now get pages from ALL spaces with unlimited pagination (up to 5000 pages)
+    const allPages = [];
+    const PAGE_LIMIT = 5000; // Limit to 5000 pages for performance
+    
+    console.log('📄 Fetching pages from all spaces...');
+    for (const space of spaces) {
+      // Stop if we've reached the page limit
+      if (allPages.length >= PAGE_LIMIT) {
+        console.log(`⚠️ Reached page limit of ${PAGE_LIMIT}, stopping`);
+        break;
+      }
+      
+      try {
+        console.log(`📖 Fetching pages for space: ${space.name} (${space.key})`);
+        
+        let spacePages = [];
+        let pageStart = 0;
+        let pageMore = true;
+        let pageFetchCount = 0;
+        
+        while (pageMore) {
+          // Stop if we've reached the page limit
+          if (allPages.length >= PAGE_LIMIT) {
+            console.log(`⚠️ Reached page limit of ${PAGE_LIMIT}, stopping space pagination`);
+            break;
+          }
+          
+          console.log(`🔍 Fetching pages batch ${pageFetchCount + 1} for space ${space.key}, start: ${pageStart}`);
+          
+          const pagesResponse = await api.asUser().requestConfluence(
+            route`/wiki/api/v2/spaces/${space.id}/pages?limit=${limit}&start=${pageStart}&sort=modified-date&order=desc`
+          );
+          
+          if (!pagesResponse.ok) {
+            console.log(`Pages API error for space ${space.key}:`, pagesResponse.status);
+            break;
+          }
+          
+          const pagesData = await pagesResponse.json();
+          const newPages = (pagesData.results || [])
+            .filter(page => page.title !== space.name && page.title !== space.key) // Filter out space names
+            .map(page => ({
+              id: page.id,
+              title: page.title,
+              spaceKey: space.key,
+              spaceName: space.name,
+              lastModified: page.version?.when || page.createdAt || 'Unknown'
+            }));
+          
+          spacePages = spacePages.concat(newPages);
+          console.log(`✅ Got ${newPages.length} pages in batch ${pageFetchCount + 1} for space ${space.key} (space total: ${spacePages.length})`);
+          
+          // Continue pagination until no more pages
+          if (pagesData._links && pagesData._links.next && newPages.length > 0) {
+            pageStart += limit;
+            pageFetchCount++;
+          } else {
+            pageMore = false;
+          }
+          
+          // Safety check: if we get an empty batch, stop
+          if (newPages.length === 0) {
+            pageMore = false;
+          }
+        }
+        
+        allPages.push(...spacePages);
+        console.log(`✅ Completed space ${space.name}: ${spacePages.length} pages (running total: ${allPages.length})`);
+        
+      } catch (error) {
+        console.error(`❌ Error loading pages for space ${space.key}:`, error);
+        // Continue with next space
+      }
+    }
+    
+    console.log(`🎉 getAllPagesOptimized COMPLETE - ${allPages.length} pages from ${spaces.length} spaces`);
+    return { 
+      pages: allPages, 
+      spaces: spaces,
+      totalCount: allPages.length,
+      loadedSpaces: spaces.length
+    };
+    
+  } catch (error) {
+    console.error('❌ getAllPagesOptimized error:', error);
+    return { 
+      pages: [], 
+      spaces: [], 
+      error: error.message,
+      totalCount: 0,
+      loadedSpaces: 0 
+    };
+  }
+});
+
+// Parse Confluence URL and load pages from specific space
+resolver.define('loadPagesFromUrl', async (req) => {
+  console.log('=== LOADING PAGES FROM URL ===');
+  try {
+    const { url } = req.payload;
+    
+    if (!url) {
+      return { success: false, error: 'URL is required' };
+    }
+    
+    // Parse the URL to extract space key and optionally page ID
+    // Support multiple formats:
+    // 1. Regular page: https://domain.atlassian.net/wiki/spaces/SPACEKEY/pages/PAGEID/PageTitle
+    // 2. Space overview: https://domain.atlassian.net/wiki/spaces/SPACEKEY/overview
+    let urlMatch = url.match(/\/wiki\/spaces\/([^\/]+)\/pages\/([^\/]+)/);
+    let spaceKey, pageId;
+    
+    if (urlMatch) {
+      // Regular page format
+      spaceKey = urlMatch[1];
+      pageId = urlMatch[2];
+      console.log(`📍 Extracted space key: ${spaceKey}, page ID: ${pageId} (regular page)`);
+    } else {
+      // Try space overview format
+      const spaceMatch = url.match(/\/wiki\/spaces\/([^\/]+)(?:\/overview)?(?:\/|$)/);
+      if (spaceMatch) {
+        spaceKey = spaceMatch[1];
+        pageId = null; // No specific page, will load all pages from space
+        console.log(`📍 Extracted space key: ${spaceKey} (space overview - will show all pages)`);
+      } else {
+        return { success: false, error: 'Invalid Confluence URL format. Expected: .../wiki/spaces/SPACEKEY/pages/PAGEID/... or .../wiki/spaces/SPACEKEY/overview' };
+      }
+    }
+    
+    // Find the space by key - try multiple approaches
+    let space = null;
+    let spacesResponse;
+    
+    // First try: Get space by key directly
+    try {
+      spacesResponse = await api.asUser().requestConfluence(route`/wiki/api/v2/spaces/${spaceKey}`);
+      if (spacesResponse.ok) {
+        const spaceData = await spacesResponse.json();
+        space = {
+          id: spaceData.id,
+          key: spaceData.key,
+          name: spaceData.name
+        };
+      }
+    } catch (err) {
+      console.log(`Direct space lookup failed: ${err.message}`);
+    }
+    
+    // Second try: Search all spaces and find by key
+    if (!space) {
+      spacesResponse = await api.asUser().requestConfluence(route`/wiki/api/v2/spaces?limit=250`);
+      if (spacesResponse.ok) {
+        const spacesData = await spacesResponse.json();
+        const foundSpace = (spacesData.results || []).find(s => s.key === spaceKey);
+        if (foundSpace) {
+          space = {
+            id: foundSpace.id,
+            key: foundSpace.key,
+            name: foundSpace.name
+          };
+        }
+      }
+    }
+    
+    if (!space) {
+      return { success: false, error: `Space '${spaceKey}' not found or not accessible. Make sure you have permission to view this space.` };
+    }
+    
+    // Load all pages from this specific space
+    let spacePages = [];
+    let pageStart = 0;
+    const limit = 250;
+    let pageMore = true;
+    let pageFetchCount = 0;
+    
+    console.log(`📄 Loading pages from space: ${space.name} (${space.key})`);
+    
+    while (pageMore) {
+      console.log(`🔍 Fetching pages batch ${pageFetchCount + 1}, start: ${pageStart}`);
+      
+      const pagesResponse = await api.asUser().requestConfluence(
+        route`/wiki/api/v2/spaces/${space.id}/pages?limit=${limit}&start=${pageStart}&sort=modified-date&order=desc`
+      );
+      
+      if (!pagesResponse.ok) {
+        console.log(`Pages API error:`, pagesResponse.status);
+        break;
+      }
+      
+      const pagesData = await pagesResponse.json();
+      const newPages = (pagesData.results || [])
+        .filter(page => page.title !== space.name && page.title !== space.key) // Filter out space names
+        .map(page => ({
+          id: page.id,
+          title: page.title,
+          spaceKey: space.key,
+          spaceName: space.name,
+          lastModified: page.version?.when || page.createdAt || 'Unknown'
+        }));
+      
+      spacePages = spacePages.concat(newPages);
+      console.log(`✅ Got ${newPages.length} pages in batch ${pageFetchCount + 1} (total: ${spacePages.length})`);
+      
+      // Continue pagination until no more pages
+      if (pagesData._links && pagesData._links.next && newPages.length > 0) {
+        pageStart += limit;
+        pageFetchCount++;
+      } else {
+        pageMore = false;
+      }
+      
+      // Safety check: if we get an empty batch, stop
+      if (newPages.length === 0) {
+        pageMore = false;
+      }
+    }
+    
+    console.log(`✅ Loaded ${spacePages.length} pages from space ${space.name}`);
+    
+    // If no specific page ID was provided (space overview URL), return all pages for browsing
+    if (!pageId) {
+      console.log(`🎯 Space overview mode: Returning all ${spacePages.length} pages for browsing`);
+      return {
+        success: true,
+        pages: spacePages, // Return all pages for browsing
+        spaces: [space],
+        autoSelect: false, // Don't auto-select, let user browse
+        directMode: false, // Allow normal browsing flow
+        message: `Loaded ${spacePages.length} pages from space "${space.name}" for browsing`
+      };
+    }
+    
+    // Find the specific page from the URL (regular page format)
+    const targetPage = spacePages.find(page => page.id === pageId);
+    
+    if (!targetPage) {
+      return { success: false, error: `Page with ID ${pageId} not found in space ${space.name}. Make sure the URL is correct and you have access to this page.` };
+    }
+    
+    console.log(`🎯 Found target page: ${targetPage.title}`);
+    
+    return {
+      success: true,
+      targetPage: targetPage, // Return only the specific page
+      spaces: [space],
+      autoSelect: true, // Flag for immediate progression
+      directMode: true // Skip page browsing entirely
+    };
+    
+  } catch (error) {
+    console.error('❌ loadPagesFromUrl error:', error);
+    return {
+      success: false,
+      error: error.message,
+      pages: [],
+      spaces: []
+    };
+  }
+});
+
+// Get all spaces only (no pages)
+resolver.define('getAllSpaces', async (req) => {
+  console.log('=== LOADING SPACES ONLY ===');
+  try {
+    let spaces = [];
+    let start = 0;
+    const limit = 250;
+    let more = true;
+    
+    while (more) {
+      const spacesResponse = await api.asUser().requestConfluence(route`/wiki/api/v2/spaces?limit=${limit}&start=${start}`);
+      
+      if (!spacesResponse.ok) {
+        throw new Error(`Spaces API failed: ${spacesResponse.status}`);
+      }
+      
+      const spacesData = await spacesResponse.json();
+      const newSpaces = (spacesData.results || []).map(space => ({
+        id: space.id,
+        key: space.key,
+        name: space.name
+      }));
+      
+      spaces = spaces.concat(newSpaces);
+      
+      if (spacesData._links && spacesData._links.next && newSpaces.length > 0) {
+        start += limit;
+      } else {
+        more = false;
+      }
+      
+      if (newSpaces.length === 0) {
+        more = false;
+      }
+    }
+    
+    console.log(`✅ Loaded ${spaces.length} spaces`);
+    return { success: true, spaces };
+    
+  } catch (error) {
+    console.error('❌ getAllSpaces error:', error);
+    return { success: false, error: error.message, spaces: [] };
+  }
+});
+
+// Get top-level pages for parent selection (optimized for performance)
+resolver.define('getParentPageOptions', async (req) => {
+  console.log('=== LOADING PARENT PAGE OPTIONS ===');
+  try {
+    const { spaceKey, spaceId } = req.payload || {};
+    
+    if (!spaceKey && !spaceId) {
+      throw new Error('spaceKey or spaceId is required');
+    }
+    
+    // Get numeric space ID and space name if needed
+    let numericSpaceId = spaceId;
+    let spaceName = null;
+    if (!numericSpaceId && spaceKey) {
+      const spaceResp = await api.asUser().requestConfluence(
+        route`/wiki/api/v2/spaces?keys=${spaceKey}&limit=1`
+      );
+      
+      if (spaceResp.ok) {
+        const spaceData = await spaceResp.json();
+        if (spaceData.results && spaceData.results[0]) {
+          numericSpaceId = spaceData.results[0].id;
+          spaceName = spaceData.results[0].name; // Get the space name
+        }
+      }
+    }
+    
+    if (!numericSpaceId) {
+      throw new Error(`Could not resolve numeric space ID for space: ${spaceKey || spaceId}`);
+    }
+    
+    console.log(`📄 Fetching parent page options for space ID: ${numericSpaceId}, name: ${spaceName}`);
+    
+    // Load only top-level pages with limited results for parent selection
+    const response = await api.asUser().requestConfluence(
+      route`/wiki/api/v2/spaces/${numericSpaceId}/pages?limit=50&sort=title&order=asc`
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log('Parent pages API error:', response.status, errorText);
+      throw new Error(`Parent pages API failed: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    const parentPages = (data.results || [])
+      .filter(page => {
+        // Filter out space names and space keys
+        return page.title !== spaceKey && page.title !== spaceName;
+      })
+      .map(page => ({
+        id: page.id,
+        title: page.title,
+        spaceKey: spaceKey,
+        lastModified: page.version?.when || page.createdAt || 'Unknown'
+      }))
+      .slice(0, 30); // Limit to top 30 pages for performance
+    
+    console.log(`✅ Loaded ${parentPages.length} parent page options`);
+    return { success: true, pages: parentPages };
+    
+  } catch (error) {
+    console.error('❌ getParentPageOptions error:', error);
+    return { success: false, error: error.message, pages: [] };
+  }
+});
+
+// ============================================================================
+// VERIFICATION FUNCTION
 // ============================================================================
 // UPLOAD TEMPLATE (from original app step 3b)
 // ============================================================================
@@ -401,58 +834,104 @@ resolver.define('bulkGeneratePages', async (req) => {
       return pageTitle;
     };
     
-    // Create pages
-    for (let i = 0; i < pageCount; i++) {
-      try {
-        const pageName = generatePageTitle(i);
-        console.log(`📝 Creating page ${i + 1}/${pageCount}: ${pageName}`);
-        
-        // Prepare page payload
-        const pagePayload = {
-          spaceId: numericSpaceId,
-          status: 'current',
-          title: pageName,
-          body: {
-            representation: 'storage',
-            value: templateData.content
-          }
-        };
-        
-        // Add parent if specified
-        if (pageOrganization === 'create-child' && actualParentPageId) {
-          pagePayload.parentId = actualParentPageId;
-        } else if (pageOrganization === 'create' && actualParentPageId) {
-          pagePayload.parentId = actualParentPageId;
-        }
-        
-        // Create the page
-        const response = await api.asUser().requestConfluence(route`/wiki/api/v2/pages`, {
-          method: 'POST',
-          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify(pagePayload)
+    // Create pages in parallel batches for better performance
+    const BATCH_SIZE = 10; // Process 10 pages at a time
+    const batches = [];
+    
+    // Split pages into batches
+    for (let i = 0; i < pageCount; i += BATCH_SIZE) {
+      const batchEnd = Math.min(i + BATCH_SIZE, pageCount);
+      const batch = [];
+      
+      for (let j = i; j < batchEnd; j++) {
+        const pageName = generatePageTitle(j);
+        batch.push({
+          index: j,
+          title: pageName
         });
-        
-        if (response.ok) {
-          const pageData = await response.json();
-          console.log('✅ Page created successfully:', pageData.id);
-          
-          const pageUrl = `${req.context.siteUrl}/wiki/spaces/${spaceKey}/pages/${pageData.id}`;
-          createdPages.push({
-            success: true,
-            pageId: pageData.id,
-            title: pageName,
-            url: pageUrl
-          });
-        } else {
-          const errorText = await response.text();
-          console.error('❌ Page creation failed:', errorText);
-          errors.push(`${pageName}: ${errorText}`);
-        }
-        
-      } catch (error) {
-        console.error(`❌ Error creating page:`, error);
-        errors.push(`Page ${i + 1}: ${error.message}`);
       }
+      batches.push(batch);
+    }
+    
+    console.log(`📦 Split ${pageCount} pages into ${batches.length} batches of ${BATCH_SIZE}`);
+    
+    // Process each batch in parallel
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      console.log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} pages`);
+      
+      // Create all pages in this batch simultaneously
+      const batchPromises = batch.map(async (pageInfo) => {
+        try {
+          console.log(`📝 Creating page ${pageInfo.index + 1}/${pageCount}: ${pageInfo.title}`);
+          
+          // Prepare page payload
+          const pagePayload = {
+            spaceId: numericSpaceId,
+            status: 'current',
+            title: pageInfo.title,
+            body: {
+              representation: 'storage',
+              value: templateData.content
+            }
+          };
+          
+          // Add parent if specified
+          if (pageOrganization === 'create-child' && actualParentPageId) {
+            pagePayload.parentId = actualParentPageId;
+          } else if (pageOrganization === 'create' && actualParentPageId) {
+            pagePayload.parentId = actualParentPageId;
+          }
+          
+          // Create the page
+          const response = await api.asUser().requestConfluence(route`/wiki/api/v2/pages`, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify(pagePayload)
+          });
+          
+          if (response.ok) {
+            const pageData = await response.json();
+            console.log('✅ Page created successfully:', pageData.id);
+            
+            const pageUrl = `${req.context.siteUrl}/wiki/spaces/${spaceKey}/pages/${pageData.id}`;
+            return {
+              success: true,
+              pageId: pageData.id,
+              title: pageInfo.title,
+              url: pageUrl
+            };
+          } else {
+            const errorText = await response.text();
+            console.error('❌ Page creation failed:', errorText);
+            return {
+              success: false,
+              error: `${pageInfo.title}: ${errorText}`
+            };
+          }
+          
+        } catch (error) {
+          console.error(`❌ Error creating page:`, error);
+          return {
+            success: false,
+            error: `Page ${pageInfo.index + 1}: ${error.message}`
+          };
+        }
+      });
+      
+      // Wait for entire batch to complete
+      const batchResults = await Promise.all(batchPromises);
+      
+      // Process results
+      batchResults.forEach(result => {
+        if (result.success) {
+          createdPages.push(result);
+        } else {
+          errors.push(result.error);
+        }
+      });
+      
+      console.log(`✅ Batch ${batchIndex + 1} complete: ${batchResults.filter(r => r.success).length} successful, ${batchResults.filter(r => !r.success).length} errors`);
     }
     
     console.log(`🏁 Bulk generation complete: ${createdPages.length} successful, ${errors.length} errors`);

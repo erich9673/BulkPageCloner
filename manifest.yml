@@ -1,7 +1,7 @@
 modules:
   macro:
     - key: bulk-page-generator-macro
-      title: Bulk Page Generator
+      title: Bulk Page Generator for Confluence
       description: Select any Confluence page and generate multiple copies
       resource: main
       resolver:

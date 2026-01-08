@@ -14,6 +14,7 @@ const BulkPageGenerator = () => {
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   
   // Page browser state (Step 1)
+  const [confluencePageUrl, setConfluencePageUrl] = useState('');
   const [allPages, setAllPages] = useState([]);
   const [filteredPages, setFilteredPages] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,45 +81,125 @@ const BulkPageGenerator = () => {
     return () => { mounted = false; };
   }, []);
 
-  // Load all pages from all spaces
+  // Load all pages from all spaces - OPTIMIZED VERSION with timeout handling
   const loadAllPages = async () => {
     setLoadingPages(true);
     setError('');
     
     try {
-      // First get all spaces
-      const spaceData = await invoke('getSpaces');
-      if (spaceData.error) {
-        setError(spaceData.error);
+      console.log('🚀 Loading pages with balanced approach...');
+      
+      // Use the optimized backend function with timeout handling
+      const result = await invoke('getAllPagesOptimized');
+      
+      if (result.error) {
+        // If we got an error but still have some pages, show them
+        if (result.pages && result.pages.length > 0) {
+          setSpaces(result.spaces || []);
+          setAllPages(result.pages);
+          setFilteredPages(result.pages);
+          setError(`Partial load completed: ${result.error}. Showing ${result.pages.length} pages.`);
+        } else {
+          setError('Failed to load pages: ' + result.error);
+        }
         return;
       }
       
-      const spacesResult = spaceData.spaces || [];
-      setSpaces(spacesResult);
+      // Set spaces and pages from the optimized response
+      setSpaces(result.spaces || []);
+      setAllPages(result.pages || []);
+      setFilteredPages(result.pages || []);
       
-      // Then get pages from each space using space key
-      const allPagesResult = [];
-      for (const space of spacesResult) {
-        try {
-          // Use space key for API calls (follows original BulkReportGenerator pattern)
-          const pagesData = await invoke('getSpacePages', { spaceKey: space.key });
-          if (pagesData.pages) {
-            const pagesWithSpace = pagesData.pages.map(page => ({
-              ...page,
-              spaceName: space.name,
-              spaceKey: space.key
-            }));
-            allPagesResult.push(...pagesWithSpace);
-          }
-        } catch (err) {
-          console.error(`Error loading pages for space ${space.key}:`, err);
-        }
-      }
+      console.log(`✅ Loaded ${result.totalCount} pages from ${result.loadedSpaces} spaces`);
       
-      setAllPages(allPagesResult);
-      setFilteredPages(allPagesResult);
     } catch (err) {
-      setError('Failed to load pages: ' + err.message);
+      // Check if it's a timeout error and provide better messaging
+      if (err.message && err.message.includes('timed out')) {
+        setError('Loading is taking longer than expected. Please try again or contact support if this persists.');
+      } else {
+        setError('Failed to load pages: ' + err.message);
+      }
+      console.error('❌ loadAllPages error:', err);
+    } finally {
+      setLoadingPages(false);
+    }
+  };
+
+  // Load spaces only (for initial load without pages)
+  const loadSpacesOnly = async () => {
+    try {
+      const result = await invoke('getAllSpaces');
+      if (result.spaces) {
+        setSpaces(result.spaces);
+      }
+    } catch (err) {
+      console.error('Failed to load spaces:', err);
+    }
+  };
+
+  // Handle URL-based page loading
+  const handleUrlLoad = async () => {
+    if (!confluencePageUrl.trim()) {
+      setError('Please enter a Confluence page URL');
+      return;
+    }
+    
+    setLoadingPages(true);
+    setError('');
+    
+    try {
+      const result = await invoke('loadPagesFromUrl', { url: confluencePageUrl });
+      
+      if (result.success) {
+        // For direct URL mode, skip page browsing and go straight to template upload
+        if (result.directMode && result.targetPage) {
+          console.log(`🎯 Direct mode: Auto-selecting page ${result.targetPage.title}`);
+          
+          // Check if page title is entered before proceeding
+          if (!pageTitle.trim()) {
+            setError('Please enter a page title then press 🔍 Load from URL');
+            return;
+          }
+          
+          // Load ALL spaces for Step 2 selection, not just the template space
+          const allSpacesResult = await invoke('getAllSpaces');
+          if (allSpacesResult.success) {
+            setSpaces(allSpacesResult.spaces);
+          } else {
+            setSpaces(result.spaces || []); // Fallback to template space
+          }
+          
+          // Don't auto-generate title, use what the user entered
+          
+          // Directly upload template and move to Step 2
+          try {
+            const uploadResult = await invoke('uploadTemplate', { 
+              pageId: result.targetPage.id,
+              name: `Template: ${result.targetPage.title}`
+            });
+            
+            if (uploadResult.success) {
+              setSelectedTemplate(uploadResult.template);
+              setCurrentStep(2);
+              console.log('✅ Direct selection successful, moved to Step 2');
+            } else {
+              setError('Failed to upload template: ' + (uploadResult.error || 'Unknown error'));
+            }
+          } catch (err) {
+            setError('Failed to upload template: ' + err.message);
+          }
+        } else {
+          // Original flow for browsing pages
+          setSpaces(result.spaces || []);
+          setAllPages(result.pages || []);
+          setFilteredPages(result.pages || []);
+          console.log(`✅ Loaded ${result.pages?.length || 0} pages from URL`);
+        }
+      } else {
+        setError('Failed to load pages from URL: ' + result.error);
+      }
+    } catch (err) {
+      setError('Failed to load pages from URL: ' + err.message);
     } finally {
       setLoadingPages(false);
     }
@@ -186,7 +267,8 @@ const BulkPageGenerator = () => {
   const loadSpacePagesForSelection = async (spaceKey) => {
     setLoadingSpacePages(true);
     try {
-      const pagesData = await invoke('getSpacePages', { spaceKey });
+      // Use optimized parent page loader for Step 3 organization
+      const pagesData = await invoke('getParentPageOptions', { spaceKey });
       if (pagesData.pages) {
         setSpacePages(pagesData.pages);
       }
@@ -289,7 +371,7 @@ const BulkPageGenerator = () => {
         onMouseEnter={(e) => {
           e.target.style.backgroundColor = '#F4F5F7';
           e.target.style.borderColor = '#B3B9C4';
-          e.target.style.color = '#172B4D';
+          e.target.style.color = '#000000';
         }}
         onMouseLeave={(e) => {
           e.target.style.backgroundColor = 'transparent';
@@ -329,7 +411,7 @@ const BulkPageGenerator = () => {
         }}>
           <h3 style={{ 
             marginBottom: '16px', 
-            color: '#172B4D', 
+            color: '#000000', 
             fontWeight: 'bold',
             fontSize: '22px',
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
@@ -344,6 +426,94 @@ const BulkPageGenerator = () => {
         }}>
           Browse and select any Confluence page to use as your template for bulk generation.
         </p>
+        
+        {/* Page Title Section - MOVED TO TOP */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ 
+            display: 'block', 
+            marginBottom: '6px', 
+            fontWeight: '600', 
+            color: '#000000', 
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
+          }}>
+            📝 Enter New Page Title
+          </label>
+          <input
+            type="text"
+            value={pageTitle}
+            onChange={(e) => setPageTitle(e.target.value)}
+            placeholder="Enter the title for your page..."
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              border: '1px solid #DFE1E6',
+              borderRadius: '3px',
+              fontSize: '14px',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
+              boxSizing: 'border-box'
+            }}
+          />
+        </div>
+        
+        {/* Helpful tip and URL input */}
+        <p style={{ 
+          color: '#6B778C', 
+          fontSize: '13px', 
+          marginBottom: '8px',
+          fontStyle: 'italic'
+        }}>
+          💡 <strong>Can't find your page?</strong> Copy and paste the Confluence link into the URL field below (limited to 5000 pages for performance).
+        </p>
+        
+        {/* Confluence Page URL Input */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{
+            display: 'block',
+            marginBottom: '6px',
+            color: 'black',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
+          }}>
+            Confluence Page URL:
+          </label>
+          <input
+            type="text"
+            value={confluencePageUrl}
+            onChange={(e) => setConfluencePageUrl(e.target.value)}
+            placeholder="Paste URL here to load pages from specific space..."
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              border: '1px solid #DFE1E6',
+              borderRadius: '3px',
+              fontSize: '14px',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
+              backgroundColor: 'white',
+              color: 'black',
+              boxSizing: 'border-box'
+            }}
+          />
+          {confluencePageUrl && (
+            <button
+              onClick={() => handleUrlLoad()}
+              disabled={loadingPages}
+              style={{
+                marginTop: '8px',
+                padding: '8px 16px',
+                backgroundColor: loadingPages ? '#DFE1E6' : '#0052CC',
+                color: 'white',
+                border: 'none',
+                borderRadius: '3px',
+                fontSize: '14px',
+                cursor: loadingPages ? 'not-allowed' : 'pointer',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
+              }}
+            >
+              {loadingPages ? '🔄 Loading...' : '🔍 Load from URL'}
+            </button>
+          )}
+        </div>
        
         {/* Search Pages Section */}
         <div style={{ marginBottom: '16px' }}>
@@ -351,7 +521,7 @@ const BulkPageGenerator = () => {
             display: 'block', 
             marginBottom: '6px', 
             fontWeight: '600', 
-            color: '#172B4D', 
+            color: '#000000', 
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
           }}>
             🔍 Search Pages
@@ -378,7 +548,7 @@ const BulkPageGenerator = () => {
             display: 'block', 
             marginBottom: '6px', 
             fontWeight: '600', 
-            color: '#172B4D', 
+            color: '#000000', 
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
           }}>
             📁 Filter by Space
@@ -405,34 +575,6 @@ const BulkPageGenerator = () => {
           </select>
         </div>
 
-        {/* Page Title Section */}
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ 
-            display: 'block', 
-            marginBottom: '6px', 
-            fontWeight: '600', 
-            color: '#172B4D', 
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
-          }}>
-            📝 Page Title
-          </label>
-          <input
-            type="text"
-            value={pageTitle}
-            onChange={(e) => setPageTitle(e.target.value)}
-            placeholder="Enter the title for your page..."
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              border: '1px solid #DFE1E6',
-              borderRadius: '3px',
-              fontSize: '14px',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
-              boxSizing: 'border-box'
-            }}
-          />
-        </div>
-
         <div style={{ 
           marginBottom: '16px', 
           color: 'black',
@@ -456,7 +598,7 @@ const BulkPageGenerator = () => {
             color: '#6B778C', 
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
           }}>
-            Loading pages...
+            <div style={{ fontSize: '16px', marginBottom: '8px' }}>🔄 Loading pages...</div>
           </div>
         ) : (
           <table style={{ 
@@ -475,7 +617,7 @@ const BulkPageGenerator = () => {
                   padding: '12px', 
                   textAlign: 'left', 
                   fontWeight: '600', 
-                  color: '#172B4D', 
+                  color: '#000000', 
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                   width: '35%',
                   wordWrap: 'break-word'
@@ -486,7 +628,7 @@ const BulkPageGenerator = () => {
                   padding: '12px', 
                   textAlign: 'left', 
                   fontWeight: '600', 
-                  color: '#172B4D', 
+                  color: '#000000', 
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                   width: '30%'
                 }}>
@@ -496,7 +638,7 @@ const BulkPageGenerator = () => {
                   padding: '12px', 
                   textAlign: 'left', 
                   fontWeight: '600', 
-                  color: '#172B4D', 
+                  color: '#000000', 
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                   width: '20%'
                 }}>
@@ -506,7 +648,7 @@ const BulkPageGenerator = () => {
                   padding: '12px', 
                   textAlign: 'center', 
                   fontWeight: '600', 
-                  color: '#172B4D', 
+                  color: '#000000', 
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                   width: '15%'
                 }}>
@@ -600,7 +742,7 @@ const BulkPageGenerator = () => {
         }}>
           <h3 style={{ 
             marginBottom: '8px', 
-            color: '#172B4D', 
+            color: '#000000', 
             fontWeight: 'bold',
             fontSize: '22px',
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
@@ -637,7 +779,7 @@ const BulkPageGenerator = () => {
               <label style={{ 
                 display: 'block', 
                 fontWeight: 'bold',
-                color: '#172B4D',
+                color: '#000000',
                 marginBottom: '4px',
                 fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
@@ -646,7 +788,7 @@ const BulkPageGenerator = () => {
               <p style={{ 
                 margin: '0 0 12px 0', 
                 fontSize: '14px', 
-                color: '#172B4D',
+                color: '#000000',
                 fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
               }}>
                 Choose the Confluence space where your reports will be created.
@@ -690,7 +832,7 @@ const BulkPageGenerator = () => {
                   alignItems: 'center',
                   gap: '8px',
                   fontWeight: 'bold',
-                  color: '#172B4D',
+                  color: '#000000',
                   marginBottom: '8px',
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
                 }}>
@@ -718,7 +860,7 @@ const BulkPageGenerator = () => {
                     style={{ marginTop: '3px' }}
                   />
                   <div>
-                    <div style={{ fontWeight: '600', color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
+                    <div style={{ fontWeight: '600', color: '#000000', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                       📁 Create child(s) page under an existing parent page
                     </div>
                     <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
@@ -743,7 +885,7 @@ const BulkPageGenerator = () => {
                     style={{ marginTop: '3px' }}
                   />
                   <div>
-                    <div style={{ fontWeight: '600', color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
+                    <div style={{ fontWeight: '600', color: '#000000', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                       📄 Create as a parent page under '{spaces.find(s => s.key === selectedSpace)?.name}'
                     </div>
                     <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
@@ -765,7 +907,7 @@ const BulkPageGenerator = () => {
                     style={{ marginTop: '3px' }}
                   />
                   <div>
-                    <div style={{ fontWeight: '600', color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
+                    <div style={{ fontWeight: '600', color: '#000000', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                       📁 Create new parent and child page
                     </div>
                     <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
@@ -791,7 +933,7 @@ const BulkPageGenerator = () => {
                 alignItems: 'center',
                 gap: '8px',
                 fontWeight: 'bold',
-                color: '#172B4D',
+                color: '#000000',
                 marginBottom: '8px',
                 fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
@@ -800,10 +942,10 @@ const BulkPageGenerator = () => {
               <p style={{ 
                 margin: '0 0 12px 0', 
                 fontSize: '13px', 
-                color: '#172B4D',
+                color: '#000000',
                 fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
               }}>
-                Choose the parent page under which your report child pages will be created. We list only the pages that are direct children of the space homepage.
+                Choose the parent page under which your report child pages will be created. Showing top 30 pages sorted alphabetically.
               </p>
               {loadingSpacePages ? (
                 <div style={{ padding: '12px', textAlign: 'center', color: '#6B778C', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
@@ -845,7 +987,7 @@ const BulkPageGenerator = () => {
               <label style={{ 
                 display: 'block',
                 fontWeight: 'bold',
-                color: '#172B4D',
+                color: '#000000',
                 marginBottom: '8px',
                 fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
@@ -854,7 +996,7 @@ const BulkPageGenerator = () => {
               <p style={{ 
                 margin: '0 0 12px 0', 
                 fontSize: '13px', 
-                color: '#172B4D',
+                color: '#000000',
                 fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
               }}>
                 Enter the title for the new parent page that will contain your report pages.
@@ -946,7 +1088,7 @@ const BulkPageGenerator = () => {
         }}>
           <h3 style={{ 
             marginBottom: '8px', 
-            color: '#172B4D', 
+            color: '#000000', 
             fontWeight: 'bold',
             fontSize: '22px',
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
@@ -994,7 +1136,7 @@ const BulkPageGenerator = () => {
                 alignItems: 'center',
                 gap: '8px',
                 fontWeight: 'bold',
-                color: '#172B4D',
+                color: '#000000',
                 marginBottom: '8px',
                 fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
@@ -1016,7 +1158,7 @@ const BulkPageGenerator = () => {
                 alignItems: 'center',
                 gap: '8px',
                 fontWeight: 'bold',
-                color: '#172B4D',
+                color: '#000000',
                 marginBottom: '12px',
                 fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}>
@@ -1036,7 +1178,7 @@ const BulkPageGenerator = () => {
                   style={{ marginTop: '3px' }}
                 />
                 <div>
-                  <div style={{ color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
+                  <div style={{ color: '#000000', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                     📄 Single Page (No Date)
                   </div>
                 </div>
@@ -1055,7 +1197,7 @@ const BulkPageGenerator = () => {
                   style={{ marginTop: '3px' }}
                 />
                 <div>
-                  <div style={{ color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
+                  <div style={{ color: '#000000', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                     🔢 Bulk Numbered Pages (e.g., Marketing Page (1), Marketing Page (2))
                   </div>
                 </div>
@@ -1074,7 +1216,7 @@ const BulkPageGenerator = () => {
                   style={{ marginTop: '3px' }}
                 />
                 <div>
-                  <div style={{ color: '#172B4D', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
+                  <div style={{ color: '#000000', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                     📅 Weekly Date Format (e.g., 'August 9, 2025')
                   </div>
                 </div>
