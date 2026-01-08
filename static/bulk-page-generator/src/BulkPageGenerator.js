@@ -5,9 +5,6 @@ const BulkPageGenerator = () => {
   const [spaces, setSpaces] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [isPopupContext, setIsPopupContext] = useState(false);
-  const [showFullApp, setShowFullApp] = useState(false);
-  const [isMacroContext, setIsMacroContext] = useState(false);
   
   // Step management
   const [currentStep, setCurrentStep] = useState(1);
@@ -61,19 +58,7 @@ const BulkPageGenerator = () => {
     const load = async () => {
       if (!mounted) return;
 
-      try {
-        const context = await router.getContext();
-        const extType = context?.extension?.type;
-        // Check if this is a macro context
-        setIsMacroContext(extType === 'macro');
-        // Treat both macro and content action invocations as popups
-        setIsPopupContext(extType === 'macro' || extType === 'contentAction' || extType === 'confluence:contentAction');
-      } catch (err) {
-        // If context cannot be read, be conservative: no close button
-        setIsMacroContext(false);
-        setIsPopupContext(false);
-      }
-
+      // Context detection removed as it's not used
       await loadAllPages();
     };
 
@@ -122,18 +107,6 @@ const BulkPageGenerator = () => {
       console.error('❌ loadAllPages error:', err);
     } finally {
       setLoadingPages(false);
-    }
-  };
-
-  // Load spaces only (for initial load without pages)
-  const loadSpacesOnly = async () => {
-    try {
-      const result = await invoke('getAllSpaces');
-      if (result.spaces) {
-        setSpaces(result.spaces);
-      }
-    } catch (err) {
-      console.error('Failed to load spaces:', err);
     }
   };
 

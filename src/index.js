@@ -3,7 +3,38 @@ import api, { route, storage } from '@forge/api';
 
 const resolver = new Resolver();
 
-console.log('🚀 BULK PAGE GENERATOR - RESOLVER LOADING...');
+// Production logging control
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const log = (message, data = null) => {
+  if (!IS_PRODUCTION) {
+    console.log(message, data ? data : '');
+  }
+};
+const logError = (message, error) => {
+  console.error(message, error?.message || error);
+};
+
+// Utility function to eliminate duplicate space lookup code
+const getSpaceById = async (spaceKey) => {
+  const spaceResp = await api.asUser().requestConfluence(
+    route`/wiki/api/v2/spaces?keys=${spaceKey}&limit=1`
+  );
+  
+  if (spaceResp.ok) {
+    const spaceData = await spaceResp.json();
+    return spaceData.results?.[0] || null;
+  }
+  return null;
+};
+
+// Utility function for consistent error handling
+const handleApiError = async (response, operation) => {
+  const errorText = await response.text();
+  logError(`${operation} API error:`, `${response.status} - ${errorText}`);
+  throw new Error(`${operation} failed: ${response.status}`);
+};
+
+log('🚀 BULK PAGE GENERATOR - RESOLVER LOADING...');
 
 // ============================================================================
 // SPACES MANAGEMENT (from original app)
@@ -11,18 +42,19 @@ console.log('🚀 BULK PAGE GENERATOR - RESOLVER LOADING...');
 
 // Get all available Confluence spaces
 resolver.define('getSpaces', async (req) => {
-  console.log('=== FETCHING SPACES ===');
+  log('=== FETCHING SPACES ===');
   try {
     // Use standard API limit of 250 (max supported by Confluence API v2)
     const response = await api.asUser().requestConfluence(route`/wiki/api/v2/spaces?limit=250`);
     
     if (!response.ok) {
-      console.log('Spaces API error:', response.status, await response.text());
+      const errorText = await response.text();
+      logError('Spaces API error:', `${response.status} - ${errorText}`);
       throw new Error(`Spaces API failed: ${response.status}`);
     }
     
     const data = await response.json();
-    console.log('Raw spaces response:', JSON.stringify(data, null, 2));
+    // Removed verbose logging for production security
     
     const spaces = (data.results || []).map(space => ({
       key: space.key,
@@ -31,17 +63,17 @@ resolver.define('getSpaces', async (req) => {
       status: space.status
     }));
     
-    console.log('✅ Total spaces fetched:', spaces.length);
+    log('✅ Total spaces fetched:', spaces.length);
     return { spaces };
   } catch (error) {
-    console.error('❌ getSpaces error:', error);
+    logError('❌ getSpaces error:', error);
     return { spaces: [], error: error.message };
   }
 });
 
 // Get pages in a specific space - based on original BulkReportGenerator logic
 resolver.define('getSpacePages', async (req) => {
-  console.log('=== FETCHING SPACE PAGES ===');
+  log('=== FETCHING SPACE PAGES ===');
   try {
     const { spaceKey, spaceId } = req.payload || {};
     
@@ -57,18 +89,12 @@ resolver.define('getSpacePages', async (req) => {
     
     // If we only have spaceKey, get the space info first to get numeric ID
     if (!numericSpaceId && spaceKey) {
-      console.log(`Looking up space ID for key: ${spaceKey}`);
-      const spaceResp = await api.asUser().requestConfluence(
-        route`/wiki/api/v2/spaces?keys=${spaceKey}&limit=1`
-      );
-      
-      if (spaceResp.ok) {
-        const spaceData = await spaceResp.json();
-        if (spaceData.results && spaceData.results[0]) {
-          numericSpaceId = spaceData.results[0].id;
-          actualSpaceKey = spaceData.results[0].key;
-          console.log(`Found numeric space ID: ${numericSpaceId} for key: ${actualSpaceKey}`);
-        }
+      log(`Looking up space ID for key: ${spaceKey}`);
+      const space = await getSpaceById(spaceKey);
+      if (space) {
+        numericSpaceId = space.id;
+        actualSpaceKey = space.key;
+        log(`Found numeric space ID: ${numericSpaceId} for key: ${actualSpaceKey}`);
       }
     }
     
@@ -76,7 +102,7 @@ resolver.define('getSpacePages', async (req) => {
       throw new Error(`Could not resolve numeric space ID for space: ${spaceKey || spaceId}`);
     }
     
-    console.log(`Fetching pages for space ID: ${numericSpaceId}`);
+    log(`Fetching pages for space ID: ${numericSpaceId}`);
     
     // UNLIMITED pagination - fetch ALL pages in space
     let allPages = [];
@@ -86,15 +112,13 @@ resolver.define('getSpacePages', async (req) => {
     let fetchCount = 0;
     
     while (more) {
-      console.log(`🔍 Fetching pages batch ${fetchCount + 1}, start: ${start}, limit: ${limit}`);
+      log(`🔍 Fetching pages batch ${fetchCount + 1}, start: ${start}, limit: ${limit}`);
       const response = await api.asUser().requestConfluence(
         route`/wiki/api/v2/spaces/${numericSpaceId}/pages?limit=${limit}&start=${start}`
       );
       
       if (!response.ok) {
-        const errorText = await response.text();
-        console.log('Pages API error:', response.status, errorText);
-        throw new Error(`Pages API failed: ${response.status} - ${errorText}`);
+        await handleApiError(response, 'Pages');
       }
       
       const data = await response.json();
@@ -108,29 +132,29 @@ resolver.define('getSpacePages', async (req) => {
         }));
       
       allPages = allPages.concat(newPages);
-      console.log(`✅ Successfully got ${newPages.length} pages in batch ${fetchCount + 1} (total: ${allPages.length})`);
+      log(`✅ Successfully got ${newPages.length} pages in batch ${fetchCount + 1} (total: ${allPages.length})`);
       
       // Continue pagination until no more pages
       if (data._links && data._links.next && newPages.length > 0) {
         start += limit;
         fetchCount++;
-        console.log(`➡️ More pages available, continuing to batch ${fetchCount + 1}...`);
+        log(`➡️ More pages available, continuing to batch ${fetchCount + 1}...`);
       } else {
         more = false;
-        console.log(`🏁 Reached end of pages, fetching complete`);
+        log(`🏁 Reached end of pages, fetching complete`);
       }
       
       // Safety check: if we get an empty batch, stop
       if (newPages.length === 0) {
-        console.log(`⚠️ Empty batch received, stopping pagination`);
+        log(`⚠️ Empty batch received, stopping pagination`);
         more = false;
       }
     }
     
-    console.log('✅ Total pages fetched for space:', allPages.length);
+    log('✅ Total pages fetched for space:', allPages.length);
     return { pages: allPages };
   } catch (error) {
-    console.error('❌ getSpacePages error:', error);
+    logError('❌ getSpacePages error:', error);
     return { pages: [], error: error.message };
   }
 });
@@ -150,14 +174,13 @@ resolver.define('getAllPagesOptimized', async (req) => {
     let more = true;
     let fetchCount = 0;
     
-    console.log('📡 Fetching all spaces with unlimited pagination...');
+    console.log('📡 Fetching all spaces...');
     while (more) {
-      console.log(`🔍 Fetching spaces batch ${fetchCount + 1}, start: ${start}, limit: ${limit}`);
-      
       const spacesResponse = await api.asUser().requestConfluence(route`/wiki/api/v2/spaces?limit=${limit}&start=${start}`);
       
       if (!spacesResponse.ok) {
-        console.log('Spaces API error:', spacesResponse.status, await spacesResponse.text());
+        const errorText = await spacesResponse.text();
+        console.error('Spaces API error:', spacesResponse.status, errorText);
         throw new Error(`Spaces API failed: ${spacesResponse.status}`);
       }
       
@@ -171,26 +194,22 @@ resolver.define('getAllPagesOptimized', async (req) => {
       }));
       
       spaces = spaces.concat(newSpaces);
-      console.log(`✅ Successfully got ${newSpaces.length} spaces in batch ${fetchCount + 1} (total: ${spaces.length})`);
       
       // Continue pagination until no more spaces
       if (spacesData._links && spacesData._links.next && newSpaces.length > 0) {
         start += limit;
         fetchCount++;
-        console.log(`➡️ More spaces available, continuing to batch ${fetchCount + 1}...`);
       } else {
         more = false;
-        console.log(`🏁 Reached end of spaces, fetching complete`);
       }
       
       // Safety check: if we get an empty batch, stop
       if (newSpaces.length === 0) {
-        console.log(`⚠️ Empty batch received, stopping pagination`);
         more = false;
       }
     }
     
-    console.log(`📊 Total spaces found: ${spaces.length}`);
+    console.log(`📊 Found ${spaces.length} spaces, loading pages...`);
     
     // Now get pages from ALL spaces with unlimited pagination (up to 5000 pages)
     const allPages = [];
@@ -511,16 +530,10 @@ resolver.define('getParentPageOptions', async (req) => {
     let numericSpaceId = spaceId;
     let spaceName = null;
     if (!numericSpaceId && spaceKey) {
-      const spaceResp = await api.asUser().requestConfluence(
-        route`/wiki/api/v2/spaces?keys=${spaceKey}&limit=1`
-      );
-      
-      if (spaceResp.ok) {
-        const spaceData = await spaceResp.json();
-        if (spaceData.results && spaceData.results[0]) {
-          numericSpaceId = spaceData.results[0].id;
-          spaceName = spaceData.results[0].name; // Get the space name
-        }
+      const space = await getSpaceById(spaceKey);
+      if (space) {
+        numericSpaceId = space.id;
+        spaceName = space.name;
       }
     }
     
@@ -742,11 +755,8 @@ resolver.define('bulkGeneratePages', async (req) => {
     // Get numeric space ID if not provided
     let numericSpaceId = spaceId;
     if (!numericSpaceId) {
-      const spaceResp = await api.asUser().requestConfluence(route`/wiki/api/v2/spaces?keys=${spaceKey}&limit=1`);
-      if (spaceResp.ok) {
-        const spaceData = await spaceResp.json();
-        numericSpaceId = spaceData.results?.[0]?.id;
-      }
+      const space = await getSpaceById(spaceKey);
+      numericSpaceId = space?.id;
     }
     
     if (!numericSpaceId) {
@@ -763,7 +773,7 @@ resolver.define('bulkGeneratePages', async (req) => {
         title: newParentTitle.trim(),
         body: {
           representation: 'storage',
-          value: `<h1>${newParentTitle}</h1><p>Parent page for bulk generated pages</p>`
+          value: `<h1>${newParentTitle}</h1>`
         }
       };
       
