@@ -773,7 +773,7 @@ resolver.define('bulkGeneratePages', async (req) => {
         title: newParentTitle.trim(),
         body: {
           representation: 'storage',
-          value: `<h1>${newParentTitle}</h1>`
+          value: ''
         }
       };
       
