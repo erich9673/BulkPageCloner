@@ -20,7 +20,6 @@ const BulkPageCloner = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSpaceFilter, setSelectedSpaceFilter] = useState('all');
   const [loadingPages, setLoadingPages] = useState(false);
-  const [pageTitle, setPageTitle] = useState('');
   
   // Step 3 state - Location Selection
   const [selectedSpace, setSelectedSpace] = useState('');
@@ -38,26 +37,7 @@ const BulkPageCloner = () => {
   const [generating, setGenerating] = useState(false);
   const [generationSuccess, setGenerationSuccess] = useState(null);
 
-  // Legacy state (for backward compatibility during transition)
-  const [generationMode, setGenerationMode] = useState('numbered');
-  const [numberedCount, setNumberedCount] = useState(3);
-  
-  // Weekly configuration
-  const [weeklyStartMonth, setWeeklyStartMonth] = useState('October');
-  const [weeklyStartDay, setWeeklyStartDay] = useState(16);
-  const [weeklyStartYear, setWeeklyStartYear] = useState(2025);
-  const [weeklyCount, setWeeklyCount] = useState(4);
-  
-  // Monthly configuration
-  const [monthlyTargetMonth, setMonthlyTargetMonth] = useState('January');
-  const [monthlyTargetYear, setMonthlyTargetYear] = useState(2025);
-  const [monthlyCount, setMonthlyCount] = useState(3);
-  
-  // Quarterly configuration
-  const [quarterlyStartMonth, setQuarterlyStartMonth] = useState('January');
-  const [quarterlyStartQuarter, setQuarterlyStartQuarter] = useState('Q1');
-  const [quarterlyTargetYear, setQuarterlyTargetYear] = useState(2025);
-  const [quarterlyCount, setQuarterlyCount] = useState(2);
+
 
   // Load all pages and check context on component mount
   useEffect(() => {
@@ -334,12 +314,6 @@ const BulkPageCloner = () => {
       setGenerating(false);
     }
   };
-  
-  // Handle next button in step 2 - kept for backward compatibility
-  const handleNextStep = () => {
-    console.log('handleNextStep called - redirecting to generatePages');
-    generatePages();
-  };
 
   // Helper function to handle duplicates by adding (1), (2), etc.
   const handleDuplicateNames = (titles) => {
@@ -435,7 +409,6 @@ const BulkPageCloner = () => {
     const monthWithYearRegex = /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i;
     const monthOnlyRegex = /^(January|February|March|April|May|June|July|August|September|October|November|December)$/i;
     const monthInTitleRegex = /(January|February|March|April|May|June|July|August|September|October|November|December)/i;
-    const quarterRegex = /Q([1-4])\s+(\d{4})/i;
     const standardDateRegex = /(\d{1,2}\/\d{1,2}\/\d{4}|\w+ \d{1,2}, \d{4})/;
     
     // Check for monthly patterns with year (e.g., "January 2026", "February 2026")
@@ -1714,8 +1687,6 @@ const BulkPageCloner = () => {
                 // Validate all titles are filled before proceeding
                 const allTitlesFilled = pageTitles.filter(title => title.trim()).length === pageCount;
                 if (allTitlesFilled) {
-                  // Update the old state to work with existing backend
-                  setNumberedCount(pageCount);
                   setCurrentStep(3);
                 } else {
                   setError(`Please fill in all ${pageCount} page titles before continuing`);
@@ -1881,24 +1852,10 @@ const BulkPageCloner = () => {
               setGenerationSuccess(null);
               setCurrentStep(1);
               setSelectedTemplate(null);
-              setPageTitle('');
               setSelectedSpace('');
               setSelectedParentPage('');
               setNewParentTitle('');
               setPageOrganization('create-child');
-              setGenerationMode('single');
-              setNumberedCount(6);
-              setWeeklyStartMonth('October');
-              setWeeklyStartDay(16);
-              setWeeklyStartYear(2025);
-              setWeeklyCount(4);
-              setMonthlyTargetMonth('January');
-              setMonthlyTargetYear(2025);
-              setMonthlyCount(3);
-              setQuarterlyStartMonth('January');
-              setQuarterlyStartQuarter('Q1');
-              setQuarterlyTargetYear(2025);
-              setQuarterlyCount(2);
               setError('');
             }}
             style={{
