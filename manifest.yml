@@ -1,20 +1,20 @@
 modules:
   macro:
     - key: bulk-page-generator-macro
-      title: Bulk Page Generator for Confluence
-      description: Select any Confluence page and generate multiple copies
+      title: Bulk Page Cloner for Confluence
+      description: Select any Confluence page and clone multiple copies
       resource: main
       resolver:
         function: resolver
-      icon: resource:app-assets;Bulk Page Generator Logo (80 x 80 px).svg
+      icon: resource:app-assets;Bulk Page Cloner for Confluence (80 x 80 px).png
       autoCompleteTitle: bulkpage
       config:
         resource: main
         viewportSize: max
   confluence:globalPage:
     - key: bulk-page-generator-global-page
-      title: Bulk Page Generator for Confluence
-      icon: resource:app-assets;Bulk Page Generator Logo (128 x 128 px).png
+      title: Bulk Page Cloner for Confluence
+      icon: resource:app-assets;Bulk Page Cloner for Confluence (128 x 128 px).png
       route: bulk-page-generator
       resource: main
       resolver:

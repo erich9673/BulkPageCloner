@@ -1,6 +1,6 @@
-# Bulk Page Generator for Confluence
+# Bulk Page Cloner for Confluence
 
-A simplified Confluence Forge app that focuses on the core value of bulk page generation - taking existing pages and creating multiple copies efficiently.
+A simplified Confluence Forge app that focuses on the core value of bulk page cloning - taking existing pages and creating multiple copies efficiently.
 
 ## Core Features
 
@@ -8,7 +8,7 @@ This app simplifies the original Bulk Report Generator down to just the most val
 
 1. **Upload Template** - Select any existing Confluence page as your template
 2. **Space & Page Selection** - Choose where to create the new pages
-3. **Bulk Generate** - Create multiple copies with custom naming
+3. **Bulk Clone** - Create multiple copies with custom naming
 
 ## Quick Start
 

@@ -1,7 +1,7 @@
 {
-  "name": "bulk-page-generator",
+  "name": "bulk-page-cloner",
   "version": "1.0.0",
-  "description": "A simplified Confluence app for bulk copying and generating pages from existing templates",
+  "description": "A simplified Confluence app for bulk copying and cloning pages from existing templates",
   "author": "Eric Huang",
   "license": "MIT",
   "main": "src/resolvers/index.js",
@@ -24,7 +24,8 @@
   "keywords": [
     "confluence",
     "forge",
-    "bulk-generator",
+    "bulk-cloner",
+    "page-clone",
     "page-copy",
     "atlassian"
   ]

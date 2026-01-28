@@ -34,7 +34,7 @@ const handleApiError = async (response, operation) => {
   throw new Error(`${operation} failed: ${response.status}`);
 };
 
-log('🚀 BULK PAGE GENERATOR - RESOLVER LOADING...');
+log('🚀 BULK PAGE CLONER - RESOLVER LOADING...');
 
 // ============================================================================
 // SPACES MANAGEMENT (from original app)
@@ -715,6 +715,7 @@ resolver.define('bulkGeneratePages', async (req) => {
       spaceId,
       parentPageId,
       pageTitle,
+      pageTitles, // NEW: array of individual page titles
       generationMode = 'single',
       numberedCount = 6,
       weeklyStartMonth,
@@ -736,12 +737,31 @@ resolver.define('bulkGeneratePages', async (req) => {
       templateId,
       spaceKey,
       pageTitle,
+      pageTitles,
       generationMode,
       pageOrganization
     });
     
-    if (!templateId || !spaceKey || !pageTitle) {
-      throw new Error('templateId, spaceKey, and pageTitle are required');
+    if (!templateId || !spaceKey) {
+      throw new Error('templateId and spaceKey are required');
+    }
+    
+    // Determine what titles to use
+    let titlesToCreate = [];
+    if (pageTitles && Array.isArray(pageTitles) && pageTitles.length > 0) {
+      // Use the provided individual titles (new approach)
+      titlesToCreate = pageTitles.filter(title => title && title.trim());
+      console.log('📝 Using individual page titles:', titlesToCreate);
+    } else if (pageTitle) {
+      // Fall back to legacy generation mode
+      titlesToCreate = [pageTitle];
+      console.log('📝 Using single page title:', pageTitle);
+    } else {
+      throw new Error('Either pageTitle or pageTitles array is required');
+    }
+    
+    if (titlesToCreate.length === 0) {
+      throw new Error('No valid page titles provided');
     }
     
     // Get the template content
@@ -765,7 +785,7 @@ resolver.define('bulkGeneratePages', async (req) => {
     
     // Handle creating a new parent page if needed
     let actualParentPageId = parentPageId;
-    if (pageOrganization === 'create' && newParentTitle) {
+    if ((pageOrganization === 'create' || pageOrganization === 'create-parent') && newParentTitle) {
       console.log('Creating new parent page:', newParentTitle);
       const parentPayload = {
         spaceId: numericSpaceId,
@@ -792,57 +812,13 @@ resolver.define('bulkGeneratePages', async (req) => {
       }
     }
     
-    // Calculate how many pages to create based on generation mode
-    let pageCount = 1;
-    if (generationMode === 'numbered') {
-      pageCount = numberedCount;
-    } else if (generationMode === 'weekly') {
-      pageCount = weeklyCount;
-    } else if (generationMode === 'monthly') {
-      pageCount = monthlyCount;
-    } else if (generationMode === 'quarterly') {
-      pageCount = quarterlyCount;
-    }
+    // Calculate how many pages to create
+    const pageCount = titlesToCreate.length;
     
-    console.log(`🚀 Creating ${pageCount} pages in ${generationMode} mode`);
+    console.log(`🚀 Creating ${pageCount} pages`);
     
     const createdPages = [];
     const errors = [];
-    
-    // Helper to generate unique page title
-    const generatePageTitle = (index) => {
-      if (generationMode === 'single') {
-        return pageTitle;
-      } else if (generationMode === 'numbered') {
-        return `${pageTitle} (${index + 1})`;
-      } else if (generationMode === 'weekly') {
-        // Calculate week date
-        const monthIndex = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].indexOf(weeklyStartMonth);
-        const startDate = new Date(weeklyStartYear, monthIndex, parseInt(weeklyStartDay) || 16);
-        const targetDate = new Date(startDate);
-        targetDate.setDate(startDate.getDate() + (index * 7));
-        const weekDate = targetDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-        return `${pageTitle} - Week of ${weekDate}`;
-      } else if (generationMode === 'monthly') {
-        // Calculate month
-        const monthIndex = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].indexOf(monthlyTargetMonth);
-        const targetMonth = (monthIndex + index) % 12;
-        const targetYear = monthlyTargetYear + Math.floor((monthIndex + index) / 12);
-        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-        return `${pageTitle} - ${monthNames[targetMonth]} ${targetYear}`;
-      } else if (generationMode === 'quarterly') {
-        // Calculate quarter
-        const quarterMap = { 'Q1': 0, 'Q2': 3, 'Q3': 6, 'Q4': 9 };
-        const startQuarterMonth = quarterMap[quarterlyStartQuarter];
-        const monthsOffset = index * 3;
-        const targetMonth = (startQuarterMonth + monthsOffset) % 12;
-        const yearsOffset = Math.floor((startQuarterMonth + monthsOffset) / 12);
-        const targetYear = quarterlyTargetYear + yearsOffset;
-        const quarterNum = Math.floor(targetMonth / 3) + 1;
-        return `${pageTitle} - Q${quarterNum} ${targetYear}`;
-      }
-      return pageTitle;
-    };
     
     // Create pages in parallel batches for better performance
     const BATCH_SIZE = 10; // Process 10 pages at a time
@@ -854,10 +830,9 @@ resolver.define('bulkGeneratePages', async (req) => {
       const batch = [];
       
       for (let j = i; j < batchEnd; j++) {
-        const pageName = generatePageTitle(j);
         batch.push({
           index: j,
-          title: pageName
+          title: titlesToCreate[j]
         });
       }
       batches.push(batch);
@@ -865,13 +840,15 @@ resolver.define('bulkGeneratePages', async (req) => {
     
     console.log(`📦 Split ${pageCount} pages into ${batches.length} batches of ${BATCH_SIZE}`);
     
-    // Process each batch in parallel
+    // Process each batch sequentially
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
       console.log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} pages`);
       
-      // Create all pages in this batch simultaneously
-      const batchPromises = batch.map(async (pageInfo) => {
+      // Create pages sequentially to maintain order
+      const batchResults = [];
+      for (let i = 0; i < batch.length; i++) {
+        const pageInfo = batch[i];
         try {
           console.log(`📝 Creating page ${pageInfo.index + 1}/${pageCount}: ${pageInfo.title}`);
           
@@ -889,7 +866,7 @@ resolver.define('bulkGeneratePages', async (req) => {
           // Add parent if specified
           if (pageOrganization === 'create-child' && actualParentPageId) {
             pagePayload.parentId = actualParentPageId;
-          } else if (pageOrganization === 'create' && actualParentPageId) {
+          } else if ((pageOrganization === 'create' || pageOrganization === 'create-parent') && actualParentPageId) {
             pagePayload.parentId = actualParentPageId;
           }
           
@@ -904,33 +881,33 @@ resolver.define('bulkGeneratePages', async (req) => {
             const pageData = await response.json();
             console.log('✅ Page created successfully:', pageData.id);
             
+            // Add small delay to ensure proper creation order
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
             const pageUrl = `${req.context.siteUrl}/wiki/spaces/${spaceKey}/pages/${pageData.id}`;
-            return {
+            batchResults.push({
               success: true,
               pageId: pageData.id,
               title: pageInfo.title,
               url: pageUrl
-            };
+            });
           } else {
             const errorText = await response.text();
             console.error('❌ Page creation failed:', errorText);
-            return {
+            batchResults.push({
               success: false,
               error: `${pageInfo.title}: ${errorText}`
-            };
+            });
           }
           
         } catch (error) {
           console.error(`❌ Error creating page:`, error);
-          return {
+          batchResults.push({
             success: false,
             error: `Page ${pageInfo.index + 1}: ${error.message}`
-          };
+          });
         }
-      });
-      
-      // Wait for entire batch to complete
-      const batchResults = await Promise.all(batchPromises);
+      }
       
       // Process results
       batchResults.forEach(result => {
