@@ -1,0 +1,44 @@
+{
+  "name": "bulk-page-cloner-ui",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@forge/bridge": "^5.10.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "devDependencies": {
+    "react-scripts": "^5.0.1"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "overrides": {
+    "nth-check": "^2.1.1",
+    "postcss": "^8.4.31", 
+    "webpack-dev-server": "^5.2.2",
+    "svgo": "^3.0.0",
+    "react-scripts": {
+      "webpack-dev-server": "^5.2.2"
+    },
+    "@pmmmwh/react-refresh-webpack-plugin": {
+      "webpack-dev-server": "^5.2.2"
+    }
+  },
+  "homepage": "./"
+}

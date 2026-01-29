@@ -1,0 +1,47 @@
+modules:
+  macro:
+    - key: bulk-page-generator-macro
+      title: Bulk Page Cloner for Confluence
+      description: Select any Confluence page and clone multiple copies
+      resource: main
+      resolver:
+        function: resolver
+      icon: resource:app-assets;Bulk Page Cloner for Confluence (80 x 80 px).png
+      autoCompleteTitle: bulkpage
+      config:
+        resource: main
+        viewportSize: max
+  confluence:globalPage:
+    - key: bulk-page-generator-global-page
+      title: Bulk Page Cloner for Confluence
+      icon: resource:app-assets;Bulk Page Cloner for Confluence (128 x 128 px).png
+      route: bulk-page-generator
+      resource: main
+      resolver:
+        function: resolver
+  confluence:contentAction:
+    - key: bulk-page-generator-content-action
+      title: Create Bulk Pages
+      resource: main
+      resolver:
+        function: resolver
+      viewportSize: max
+  function:
+    - key: resolver
+      handler: index.handler
+resources:
+  - key: main
+    path: static/bulk-page-generator/build
+  - key: app-assets
+    path: assets
+permissions:
+  scopes:
+    - 'storage:app'
+    - 'read:page:confluence'
+    - 'read:space:confluence'
+    - 'write:page:confluence'
+    - 'read:user:confluence'
+app:
+  runtime:
+    name: nodejs20.x
+  id: ari:cloud:ecosystem::app/ace4883f-560a-446f-bd07-095433cede66
