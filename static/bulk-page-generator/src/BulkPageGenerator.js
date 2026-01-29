@@ -71,8 +71,8 @@ const BulkPageCloner = () => {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25); // Default 25 items per page
-  const [totalPages, setTotalPages] = useState(0);
+  const itemsPerPage = 25; // Static items per page
+  const [, setTotalPages] = useState(0); // Only setter used for resetting pagination
 
 
 
@@ -217,7 +217,7 @@ const BulkPageCloner = () => {
       setFilteredPages(filtered);
       
       // Update pagination when filters change
-      const newTotalPages = Math.ceil(filtered.length / pageSize);
+      const newTotalPages = Math.ceil(filtered.length / itemsPerPage);
       setTotalPages(newTotalPages);
       
       // Reset to first page if current page exceeds new total
@@ -227,7 +227,7 @@ const BulkPageCloner = () => {
     }, 250); // Optimized 250ms debounce
     
     debouncedFilter();
-  }, [allPages, searchQuery, selectedSpaceFilter, pageSize, currentPage]);
+  }, [allPages, searchQuery, selectedSpaceFilter, currentPage]);
 
   // Memoize paginated page rows for optimal performance
   const renderedPageRows = useMemo(() => {
@@ -250,8 +250,8 @@ const BulkPageCloner = () => {
     }
     
     // Calculate pagination slice
-    const startIndex = (currentPage - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
     const paginatedPages = filteredPages.slice(startIndex, endIndex);
     
     return paginatedPages.map((page) => (
@@ -303,7 +303,7 @@ const BulkPageCloner = () => {
         </td>
       </tr>
     ));
-  }, [filteredPages, searchQuery, selectedSpaceFilter, loading, currentPage, pageSize]);
+  }, [filteredPages, searchQuery, selectedSpaceFilter, loading, currentPage]);
 
   // Handle page selection for template (Step 1)
   const handlePageSelect = async (page) => {
@@ -1664,18 +1664,32 @@ const BulkPageCloner = () => {
                   cursor: 'pointer'
                 }}
               />
-              <span style={{
-                minWidth: '40px',
-                padding: '6px 12px',
-                backgroundColor: '#0052CC',
-                color: 'white',
-                borderRadius: '3px',
-                fontWeight: '600',
-                fontSize: '14px',
-                textAlign: 'center'
-              }}>
-                {pageCount}
-              </span>
+              <input
+                type="number"
+                min="1"
+                max="25"
+                value={pageCount}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value) || 1;
+                  const clampedValue = Math.min(Math.max(value, 1), 25);
+                  updatePageCount(clampedValue);
+                }}
+                style={{
+                  minWidth: '40px',
+                  width: '60px',
+                  padding: '6px 8px',
+                  backgroundColor: '#0052CC',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '3px',
+                  fontWeight: '600',
+                  fontSize: '14px',
+                  textAlign: 'center',
+                  outline: 'none',
+                  cursor: 'text'
+                }}
+                onFocus={(e) => e.target.select()}
+              />
             </div>
             <p style={{
               margin: '8px 0 0 0',

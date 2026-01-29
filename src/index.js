@@ -9,15 +9,15 @@ const IS_DEV = !IS_PRODUCTION;
 
 // Optimized logging functions
 const log = IS_DEV ? (message, data = null) => {
-  console.log(message, data ? data : '');
+  log(message, data ? data : '');
 } : () => {};
 
 const logError = (message, error) => {
   // Always log errors, but with less detail in production
   if (IS_PRODUCTION) {
-    console.error(message, error?.message || 'Error occurred');
+    logError(message, error?.message || 'Error occurred');
   } else {
-    console.error(message, error?.message || error);
+    logError(message, error?.message || error);
   }
 };
 
@@ -189,7 +189,7 @@ resolver.define('getSpacePages', async (req) => {
 
 // Get all pages from all spaces efficiently with unlimited pagination (BRG pattern)
 resolver.define('getAllPagesOptimized', async (req) => {
-  console.log('=== FETCHING ALL PAGES OPTIMIZED (BRG PATTERN) ===');
+  log('=== FETCHING ALL PAGES OPTIMIZED (BRG PATTERN) ===');
   try {
     // First get ALL spaces with unlimited pagination
     let spaces = [];
@@ -198,13 +198,13 @@ resolver.define('getAllPagesOptimized', async (req) => {
     let more = true;
     let fetchCount = 0;
     
-    console.log('📡 Fetching all spaces...');
+    log('📡 Fetching all spaces...');
     while (more) {
       const spacesResponse = await api.asUser().requestConfluence(route`/wiki/api/v2/spaces?limit=${limit}&start=${start}`);
       
       if (!spacesResponse.ok) {
         const errorText = await spacesResponse.text();
-        console.error('Spaces API error:', spacesResponse.status, errorText);
+        logError('Spaces API error:', spacesResponse.status, errorText);
         throw new Error(`Spaces API failed: ${spacesResponse.status}`);
       }
       
@@ -233,22 +233,22 @@ resolver.define('getAllPagesOptimized', async (req) => {
       }
     }
     
-    console.log(`📊 Found ${spaces.length} spaces, loading pages...`);
+    log(`📊 Found ${spaces.length} spaces, loading pages...`);
     
     // Now get pages from ALL spaces with unlimited pagination (up to 5000 pages)
     const allPages = [];
     const PAGE_LIMIT = 5000; // Limit to 5000 pages for performance
     
-    console.log('📄 Fetching pages from all spaces...');
+    log('📄 Fetching pages from all spaces...');
     for (const space of spaces) {
       // Stop if we've reached the page limit
       if (allPages.length >= PAGE_LIMIT) {
-        console.log(`⚠️ Reached page limit of ${PAGE_LIMIT}, stopping`);
+        log(`⚠️ Reached page limit of ${PAGE_LIMIT}, stopping`);
         break;
       }
       
       try {
-        console.log(`📖 Fetching pages for space: ${space.name} (${space.key})`);
+        log(`📖 Fetching pages for space: ${space.name} (${space.key})`);
         
         let spacePages = [];
         let pageStart = 0;
@@ -258,18 +258,18 @@ resolver.define('getAllPagesOptimized', async (req) => {
         while (pageMore) {
           // Stop if we've reached the page limit
           if (allPages.length >= PAGE_LIMIT) {
-            console.log(`⚠️ Reached page limit of ${PAGE_LIMIT}, stopping space pagination`);
+            log(`⚠️ Reached page limit of ${PAGE_LIMIT}, stopping space pagination`);
             break;
           }
           
-          console.log(`🔍 Fetching pages batch ${pageFetchCount + 1} for space ${space.key}, start: ${pageStart}`);
+          log(`🔍 Fetching pages batch ${pageFetchCount + 1} for space ${space.key}, start: ${pageStart}`);
           
           const pagesResponse = await api.asUser().requestConfluence(
             route`/wiki/api/v2/spaces/${space.id}/pages?limit=${limit}&start=${pageStart}&sort=modified-date&order=desc`
           );
           
           if (!pagesResponse.ok) {
-            console.log(`Pages API error for space ${space.key}:`, pagesResponse.status);
+            log(`Pages API error for space ${space.key}:`, pagesResponse.status);
             break;
           }
           
@@ -285,7 +285,7 @@ resolver.define('getAllPagesOptimized', async (req) => {
             }));
           
           spacePages = spacePages.concat(newPages);
-          console.log(`✅ Got ${newPages.length} pages in batch ${pageFetchCount + 1} for space ${space.key} (space total: ${spacePages.length})`);
+          log(`✅ Got ${newPages.length} pages in batch ${pageFetchCount + 1} for space ${space.key} (space total: ${spacePages.length})`);
           
           // Continue pagination until no more pages
           if (pagesData._links && pagesData._links.next && newPages.length > 0) {
@@ -302,15 +302,15 @@ resolver.define('getAllPagesOptimized', async (req) => {
         }
         
         allPages.push(...spacePages);
-        console.log(`✅ Completed space ${space.name}: ${spacePages.length} pages (running total: ${allPages.length})`);
+        log(`✅ Completed space ${space.name}: ${spacePages.length} pages (running total: ${allPages.length})`);
         
       } catch (error) {
-        console.error(`❌ Error loading pages for space ${space.key}:`, error);
+        logError(`❌ Error loading pages for space ${space.key}:`, error);
         // Continue with next space
       }
     }
     
-    console.log(`🎉 getAllPagesOptimized COMPLETE - ${allPages.length} pages from ${spaces.length} spaces`);
+    log(`🎉 getAllPagesOptimized COMPLETE - ${allPages.length} pages from ${spaces.length} spaces`);
     return { 
       pages: allPages, 
       spaces: spaces,
@@ -319,7 +319,7 @@ resolver.define('getAllPagesOptimized', async (req) => {
     };
     
   } catch (error) {
-    console.error('❌ getAllPagesOptimized error:', error);
+    logError('❌ getAllPagesOptimized error:', error);
     return { 
       pages: [], 
       spaces: [], 
@@ -332,7 +332,7 @@ resolver.define('getAllPagesOptimized', async (req) => {
 
 // Parse Confluence URL and load pages from specific space
 resolver.define('loadPagesFromUrl', async (req) => {
-  console.log('=== LOADING PAGES FROM URL ===');
+  log('=== LOADING PAGES FROM URL ===');
   try {
     const { url } = req.payload;
     
@@ -351,14 +351,14 @@ resolver.define('loadPagesFromUrl', async (req) => {
       // Regular page format
       spaceKey = urlMatch[1];
       pageId = urlMatch[2];
-      console.log(`📍 Extracted space key: ${spaceKey}, page ID: ${pageId} (regular page)`);
+      log(`📍 Extracted space key: ${spaceKey}, page ID: ${pageId} (regular page)`);
     } else {
       // Try space overview format
       const spaceMatch = url.match(/\/wiki\/spaces\/([^\/]+)(?:\/overview)?(?:\/|$)/);
       if (spaceMatch) {
         spaceKey = spaceMatch[1];
         pageId = null; // No specific page, will load all pages from space
-        console.log(`📍 Extracted space key: ${spaceKey} (space overview - will show all pages)`);
+        log(`📍 Extracted space key: ${spaceKey} (space overview - will show all pages)`);
       } else {
         return { success: false, error: 'Invalid Confluence URL format. Expected: .../wiki/spaces/SPACEKEY/pages/PAGEID/... or .../wiki/spaces/SPACEKEY/overview' };
       }
@@ -380,7 +380,7 @@ resolver.define('loadPagesFromUrl', async (req) => {
         };
       }
     } catch (err) {
-      console.log(`Direct space lookup failed: ${err.message}`);
+      log(`Direct space lookup failed: ${err.message}`);
     }
     
     // Second try: Search all spaces and find by key
@@ -410,17 +410,17 @@ resolver.define('loadPagesFromUrl', async (req) => {
     let pageMore = true;
     let pageFetchCount = 0;
     
-    console.log(`📄 Loading pages from space: ${space.name} (${space.key})`);
+    log(`📄 Loading pages from space: ${space.name} (${space.key})`);
     
     while (pageMore) {
-      console.log(`🔍 Fetching pages batch ${pageFetchCount + 1}, start: ${pageStart}`);
+      log(`🔍 Fetching pages batch ${pageFetchCount + 1}, start: ${pageStart}`);
       
       const pagesResponse = await api.asUser().requestConfluence(
         route`/wiki/api/v2/spaces/${space.id}/pages?limit=${limit}&start=${pageStart}&sort=modified-date&order=desc`
       );
       
       if (!pagesResponse.ok) {
-        console.log(`Pages API error:`, pagesResponse.status);
+        log(`Pages API error:`, pagesResponse.status);
         break;
       }
       
@@ -436,7 +436,7 @@ resolver.define('loadPagesFromUrl', async (req) => {
         }));
       
       spacePages = spacePages.concat(newPages);
-      console.log(`✅ Got ${newPages.length} pages in batch ${pageFetchCount + 1} (total: ${spacePages.length})`);
+      log(`✅ Got ${newPages.length} pages in batch ${pageFetchCount + 1} (total: ${spacePages.length})`);
       
       // Continue pagination until no more pages
       if (pagesData._links && pagesData._links.next && newPages.length > 0) {
@@ -452,11 +452,11 @@ resolver.define('loadPagesFromUrl', async (req) => {
       }
     }
     
-    console.log(`✅ Loaded ${spacePages.length} pages from space ${space.name}`);
+    log(`✅ Loaded ${spacePages.length} pages from space ${space.name}`);
     
     // If no specific page ID was provided (space overview URL), return all pages for browsing
     if (!pageId) {
-      console.log(`🎯 Space overview mode: Returning all ${spacePages.length} pages for browsing`);
+      log(`🎯 Space overview mode: Returning all ${spacePages.length} pages for browsing`);
       return {
         success: true,
         pages: spacePages, // Return all pages for browsing
@@ -474,7 +474,7 @@ resolver.define('loadPagesFromUrl', async (req) => {
       return { success: false, error: `Page with ID ${pageId} not found in space ${space.name}. Make sure the URL is correct and you have access to this page.` };
     }
     
-    console.log(`🎯 Found target page: ${targetPage.title}`);
+    log(`🎯 Found target page: ${targetPage.title}`);
     
     return {
       success: true,
@@ -485,7 +485,7 @@ resolver.define('loadPagesFromUrl', async (req) => {
     };
     
   } catch (error) {
-    console.error('❌ loadPagesFromUrl error:', error);
+    logError('❌ loadPagesFromUrl error:', error);
     return {
       success: false,
       error: error.message,
@@ -497,7 +497,7 @@ resolver.define('loadPagesFromUrl', async (req) => {
 
 // Get all spaces only (no pages)
 resolver.define('getAllSpaces', async (req) => {
-  console.log('=== LOADING SPACES ONLY ===');
+  log('=== LOADING SPACES ONLY ===');
   try {
     let spaces = [];
     let start = 0;
@@ -531,18 +531,18 @@ resolver.define('getAllSpaces', async (req) => {
       }
     }
     
-    console.log(`✅ Loaded ${spaces.length} spaces`);
+    log(`✅ Loaded ${spaces.length} spaces`);
     return { success: true, spaces };
     
   } catch (error) {
-    console.error('❌ getAllSpaces error:', error);
+    logError('❌ getAllSpaces error:', error);
     return { success: false, error: error.message, spaces: [] };
   }
 });
 
 // Get top-level pages for parent selection (optimized for performance)
 resolver.define('getParentPageOptions', async (req) => {
-  console.log('=== LOADING PARENT PAGE OPTIONS ===');
+  log('=== LOADING PARENT PAGE OPTIONS ===');
   try {
     const { spaceKey, spaceId } = req.payload || {};
     
@@ -565,7 +565,7 @@ resolver.define('getParentPageOptions', async (req) => {
       throw new Error(`Could not resolve numeric space ID for space: ${spaceKey || spaceId}`);
     }
     
-    console.log(`📄 Fetching parent page options for space ID: ${numericSpaceId}, name: ${spaceName}`);
+    log(`📄 Fetching parent page options for space ID: ${numericSpaceId}, name: ${spaceName}`);
     
     // Load pages with limited results for parent selection
     const response = await api.asUser().requestConfluence(
@@ -574,7 +574,7 @@ resolver.define('getParentPageOptions', async (req) => {
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('Parent pages API error:', response.status, errorText);
+      log('Parent pages API error:', response.status, errorText);
       throw new Error(`Parent pages API failed: ${response.status} - ${errorText}`);
     }
     
@@ -592,11 +592,11 @@ resolver.define('getParentPageOptions', async (req) => {
       }))
       .slice(0, 30); // Limit to top 30 pages for performance
     
-    console.log(`✅ Loaded ${parentPages.length} parent page options`);
+    log(`✅ Loaded ${parentPages.length} parent page options`);
     return { success: true, pages: parentPages };
     
   } catch (error) {
-    console.error('❌ getParentPageOptions error:', error);
+    logError('❌ getParentPageOptions error:', error);
     return { success: false, error: error.message, pages: [] };
   }
 });
@@ -611,7 +611,7 @@ resolver.define('getParentPageOptions', async (req) => {
 resolver.define('uploadTemplate', async (req) => {
   try {
     const { url, pageId, name } = req.payload || {};
-    console.log('📤 uploadTemplate called with URL:', url, 'pageId:', pageId, 'name:', name);
+    log('📤 uploadTemplate called with URL:', url, 'pageId:', pageId, 'name:', name);
 
     let finalPageId = pageId;
     
@@ -645,7 +645,7 @@ resolver.define('uploadTemplate', async (req) => {
       };
     }
 
-    console.log('📏 Extracted page ID:', finalPageId);
+    log('📏 Extracted page ID:', finalPageId);
 
     // Fetch the page content using Confluence API v2
     const response = await api.asUser().requestConfluence(
@@ -658,14 +658,14 @@ resolver.define('uploadTemplate', async (req) => {
     }
     
     const pageData = await response.json();
-    console.log('✅ Page data fetched for cloning:', pageData.title);
-    console.log('📄 Original content length:', pageData.body.storage.value.length);
+    log('✅ Page data fetched for cloning:', pageData.title);
+    log('📄 Original content length:', pageData.body.storage.value.length);
     
     // Use custom template name if provided, otherwise auto-generate from page title
     const finalTemplateName = name && name.trim() 
       ? name.trim() 
       : pageData.title || 'Cloned Page';
-    console.log('📝 Final template name:', finalTemplateName);
+    log('📝 Final template name:', finalTemplateName);
     
     // Create template object - store raw content for direct cloning
     const templateId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -683,7 +683,7 @@ resolver.define('uploadTemplate', async (req) => {
     // Store template in Forge storage
     await storage.set(`template_${templateId}`, template);
     
-    console.log('✅ Template created and stored:', templateId);
+    log('✅ Template created and stored:', templateId);
     return {
       success: true,
       template: {
@@ -695,7 +695,7 @@ resolver.define('uploadTemplate', async (req) => {
     };
     
   } catch (error) {
-    console.error('❌ uploadTemplate error:', error);
+    logError('❌ uploadTemplate error:', error);
     return { success: false, error: error.message };
   }
 });
@@ -703,7 +703,7 @@ resolver.define('uploadTemplate', async (req) => {
 // Get all user uploaded templates
 resolver.define('getUserTemplates', async (req) => {
   try {
-    console.log('📋 Getting user templates...');
+    log('📋 Getting user templates...');
     
     // Get all storage keys
     const keys = await storage.query().where('key', 'startsWith', 'template_').getMany();
@@ -718,10 +718,10 @@ resolver.define('getUserTemplates', async (req) => {
       };
     });
     
-    console.log('✅ Found templates:', templates.length);
+    log('✅ Found templates:', templates.length);
     return { templates };
   } catch (error) {
-    console.error('❌ getUserTemplates error:', error);
+    logError('❌ getUserTemplates error:', error);
     return { templates: [], error: error.message };
   }
 });
@@ -755,7 +755,7 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
     newParentTitle
   } = req.payload || {};
   
-  console.log('🏭 bulkGeneratePagesWithProgress called with:', {
+  log('🏭 bulkGeneratePagesWithProgress called with:', {
     templateId,
     spaceKey,
     pageTitle,
@@ -773,10 +773,10 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
   let titlesToCreate = [];
   if (pageTitles && Array.isArray(pageTitles) && pageTitles.length > 0) {
     titlesToCreate = pageTitles.filter(title => title && title.trim());
-    console.log('📝 Using individual page titles:', titlesToCreate);
+    log('📝 Using individual page titles:', titlesToCreate);
   } else if (pageTitle) {
     titlesToCreate = [pageTitle];
-    console.log('📝 Using single page title:', pageTitle);
+    log('📝 Using single page title:', pageTitle);
   } else {
     throw new Error('Either pageTitle or pageTitles array is required');
   }
@@ -791,7 +791,7 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
     throw new Error(`Template ${templateId} not found`);
   }
   
-  console.log('📄 Using template:', templateData.name);
+  log('📄 Using template:', templateData.name);
   
   // Get numeric space ID if not provided
   let numericSpaceId = spaceId;
@@ -806,14 +806,14 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
         numericSpaceId = spaceData.results?.[0]?.id;
       }
     } catch (err) {
-      console.error('Error getting space ID:', err);
+      logError('Error getting space ID:', err);
     }
   }
   
   // Handle parent page creation if needed
   let actualParentPageId = null;
   if (pageOrganization === 'create-parent' && newParentTitle) {
-    console.log('🏗️  Creating new parent page:', newParentTitle);
+    log('🏗️  Creating new parent page:', newParentTitle);
     
     const parentPayload = {
       spaceId: numericSpaceId,
@@ -834,7 +834,7 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
     if (parentResponse.ok) {
       const parentData = await parentResponse.json();
       actualParentPageId = parentData.id;
-      console.log('✅ Parent page created:', actualParentPageId);
+      log('✅ Parent page created:', actualParentPageId);
     } else {
       throw new Error('Failed to create parent page');
     }
@@ -847,7 +847,7 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
   const pageCount = titlesToCreate.length;
   const OPTIMAL_BATCH_SIZE = Math.min(5, Math.max(1, Math.ceil(pageCount / 10))); // Dynamic batch size: 1-5 pages
   
-  console.log(`🚀 Creating ${pageCount} pages with optimized batch size: ${OPTIMAL_BATCH_SIZE}`);
+  log(`🚀 Creating ${pageCount} pages with optimized batch size: ${OPTIMAL_BATCH_SIZE}`);
   
   const createdPages = [];
   const errors = [];
@@ -867,17 +867,18 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
     batches.push(batch);
   }
   
-  console.log(`📦 Split ${pageCount} pages into ${batches.length} optimized batches of ${OPTIMAL_BATCH_SIZE}`);
+  log(`📦 Split ${pageCount} pages into ${batches.length} optimized batches of ${OPTIMAL_BATCH_SIZE}`);
   
   // Enhanced processing with progress tracking
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     const batch = batches[batchIndex];
-    console.log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} pages`);
+    log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} pages`);
     
-    // Process batch pages in parallel for better performance (within API rate limits)
-    const batchPromises = batch.map(async (pageInfo) => {
+    // Process pages SEQUENTIALLY within each batch to maintain order
+    const batchResults = [];
+    for (const pageInfo of batch) {
       try {
-        console.log(`📝 Creating page ${pageInfo.index + 1}/${pageCount}: ${pageInfo.title}`);
+        log(`📝 Creating page ${pageInfo.index + 1}/${pageCount}: ${pageInfo.title}`);
         
         const pagePayload = {
           spaceId: numericSpaceId,
@@ -902,8 +903,8 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
         
         if (response.ok) {
           const pageData = await response.json();
-          console.log(`✅ Page created: ${pageData.title} (ID: ${pageData.id})`);
-          return {
+          log(`✅ Page created: ${pageData.title} (ID: ${pageData.id})`);
+          batchResults.push({
             index: pageInfo.index,
             success: true,
             page: {
@@ -911,35 +912,29 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
               title: pageData.title,
               url: pageData._links?.base + pageData._links?.webui
             }
-          };
+          });
         } else {
           const errorText = await response.text();
-          console.log(`❌ Failed to create page ${pageInfo.title}: ${response.status} - ${errorText}`);
-          return {
+          log(`❌ Failed to create page ${pageInfo.title}: ${response.status} - ${errorText}`);
+          batchResults.push({
             index: pageInfo.index,
             success: false,
             error: `Failed to create page: ${response.status}`,
             title: pageInfo.title
-          };
+          });
         }
       } catch (error) {
-        console.error(`❌ Error creating page ${pageInfo.title}:`, error);
-        return {
+        logError(`❌ Error creating page ${pageInfo.title}:`, error);
+        batchResults.push({
           index: pageInfo.index,
           success: false,
           error: error.message,
           title: pageInfo.title
-        };
+        });
       }
-    });
+    }
     
-    // Wait for all pages in current batch to complete
-    const batchResults = await Promise.all(batchPromises);
-    
-    // Sort batch results by original index to preserve order
-    batchResults.sort((a, b) => a.index - b.index);
-    
-    // Process batch results in correct order
+    // Process batch results (already in correct order)
     batchResults.forEach(result => {
       if (result.success) {
         createdPages.push(result.page);
@@ -953,7 +948,7 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
       await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
     }
     
-    console.log(`✅ Batch ${batchIndex + 1}/${batches.length} completed. Success: ${batchResults.filter(r => r.success).length}, Errors: ${batchResults.filter(r => !r.success).length}`);
+    log(`✅ Batch ${batchIndex + 1}/${batches.length} completed. Success: ${batchResults.filter(r => r.success).length}, Errors: ${batchResults.filter(r => !r.success).length}`);
   }
   
   const finalResults = {
@@ -970,18 +965,18 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
     }
   };
   
-  console.log(`🎉 Bulk generation completed: ${createdPages.length}/${pageCount} pages created successfully`);
+  log(`🎉 Bulk generation completed: ${createdPages.length}/${pageCount} pages created successfully`);
   return finalResults;
 });
 
 // Close modal function for Custom UI
 resolver.define('closeModal', async (req) => {
-  console.log('=== CLOSING MODAL ===');
+  log('=== CLOSING MODAL ===');
   try {
     // For Custom UI modals, we'll return success and let the frontend handle the closing
     return { success: true, action: 'close' };
   } catch (error) {
-    console.error('❌ closeModal error:', error);
+    logError('❌ closeModal error:', error);
     return { success: false, error: error.message };
   }
 });
