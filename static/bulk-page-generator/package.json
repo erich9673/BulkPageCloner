@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "@forge/bridge": "^5.2.0",
+    "@forge/bridge": "^5.10.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

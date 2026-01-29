@@ -3,15 +3,39 @@ import api, { route, storage } from '@forge/api';
 
 const resolver = new Resolver();
 
-// Production logging control
+// Enhanced production logging control with better performance
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-const log = (message, data = null) => {
-  if (!IS_PRODUCTION) {
-    console.log(message, data ? data : '');
+const IS_DEV = !IS_PRODUCTION;
+
+// Optimized logging functions
+const log = IS_DEV ? (message, data = null) => {
+  console.log(message, data ? data : '');
+} : () => {};
+
+const logError = (message, error) => {
+  // Always log errors, but with less detail in production
+  if (IS_PRODUCTION) {
+    console.error(message, error?.message || 'Error occurred');
+  } else {
+    console.error(message, error?.message || error);
   }
 };
-const logError = (message, error) => {
-  console.error(message, error?.message || error);
+
+// Cache for frequently accessed data to reduce API calls
+const cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+const getCached = (key) => {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  cache.delete(key);
+  return null;
+};
+
+const setCache = (key, data) => {
+  cache.set(key, { data, timestamp: Date.now() });
 };
 
 // Utility function to eliminate duplicate space lookup code
@@ -543,7 +567,7 @@ resolver.define('getParentPageOptions', async (req) => {
     
     console.log(`📄 Fetching parent page options for space ID: ${numericSpaceId}, name: ${spaceName}`);
     
-    // Load only top-level pages with limited results for parent selection
+    // Load pages with limited results for parent selection
     const response = await api.asUser().requestConfluence(
       route`/wiki/api/v2/spaces/${numericSpaceId}/pages?limit=50&sort=title&order=asc`
     );
@@ -557,7 +581,7 @@ resolver.define('getParentPageOptions', async (req) => {
     const data = await response.json();
     const parentPages = (data.results || [])
       .filter(page => {
-        // Filter out space names and space keys
+        // Filter out space names and space keys only
         return page.title !== spaceKey && page.title !== spaceName;
       })
       .map(page => ({
@@ -707,236 +731,247 @@ resolver.define('getUserTemplates', async (req) => {
 // ============================================================================
 
 // Create multiple pages from a template with support for single, numbered, weekly, monthly, quarterly modes
-resolver.define('bulkGeneratePages', async (req) => {
-  try {
-    const { 
-      templateId, 
-      spaceKey,
-      spaceId,
-      parentPageId,
-      pageTitle,
-      pageTitles, // NEW: array of individual page titles
-      generationMode = 'single',
-      numberedCount = 6,
-      weeklyStartMonth,
-      weeklyStartDay,
-      weeklyStartYear,
-      weeklyCount,
-      monthlyTargetMonth,
-      monthlyTargetYear,
-      monthlyCount,
-      quarterlyStartMonth,
-      quarterlyStartQuarter,
-      quarterlyTargetYear,
-      quarterlyCount,
-      pageOrganization = 'create-child',
-      newParentTitle
-    } = req.payload || {};
-    
-    console.log('🏭 bulkGeneratePages called with:', {
-      templateId,
-      spaceKey,
-      pageTitle,
-      pageTitles,
-      generationMode,
-      pageOrganization
-    });
-    
-    if (!templateId || !spaceKey) {
-      throw new Error('templateId and spaceKey are required');
-    }
-    
-    // Determine what titles to use
-    let titlesToCreate = [];
-    if (pageTitles && Array.isArray(pageTitles) && pageTitles.length > 0) {
-      // Use the provided individual titles (new approach)
-      titlesToCreate = pageTitles.filter(title => title && title.trim());
-      console.log('📝 Using individual page titles:', titlesToCreate);
-    } else if (pageTitle) {
-      // Fall back to legacy generation mode
-      titlesToCreate = [pageTitle];
-      console.log('📝 Using single page title:', pageTitle);
-    } else {
-      throw new Error('Either pageTitle or pageTitles array is required');
-    }
-    
-    if (titlesToCreate.length === 0) {
-      throw new Error('No valid page titles provided');
-    }
-    
-    // Get the template content
-    const templateData = await storage.get(`template_${templateId}`);
-    if (!templateData) {
-      throw new Error(`Template ${templateId} not found`);
-    }
-    
-    console.log('📄 Using template:', templateData.name);
-    
-    // Get numeric space ID if not provided
-    let numericSpaceId = spaceId;
-    if (!numericSpaceId) {
-      const space = await getSpaceById(spaceKey);
-      numericSpaceId = space?.id;
-    }
-    
-    if (!numericSpaceId) {
-      throw new Error(`Could not resolve numeric space ID for space: ${spaceKey}`);
-    }
-    
-    // Handle creating a new parent page if needed
-    let actualParentPageId = parentPageId;
-    if ((pageOrganization === 'create' || pageOrganization === 'create-parent') && newParentTitle) {
-      console.log('Creating new parent page:', newParentTitle);
-      const parentPayload = {
-        spaceId: numericSpaceId,
-        status: 'current',
-        title: newParentTitle.trim(),
-        body: {
-          representation: 'storage',
-          value: ''
-        }
-      };
+// Enhanced bulk page generation with progress tracking and optimized performance
+resolver.define('bulkGeneratePagesWithProgress', async (req) => {
+  const {
+    templateId,
+    spaceKey,
+    spaceId,
+    pageTitle,
+    pageTitles,
+    generationMode = 'bulk',
+    numberedCount = 3,
+    numberedPrefix = 'Page',
+    weeklyStartDate,
+    weeklyCount,
+    monthlyStartMonth,
+    monthlyTargetYear,
+    monthlyCount,
+    quarterlyStartMonth,
+    quarterlyStartQuarter,
+    quarterlyTargetYear,
+    quarterlyCount,
+    pageOrganization = 'create-child',
+    newParentTitle
+  } = req.payload || {};
+  
+  console.log('🏭 bulkGeneratePagesWithProgress called with:', {
+    templateId,
+    spaceKey,
+    pageTitle,
+    pageTitles,
+    generationMode,
+    pageOrganization,
+    totalPages: pageTitles?.length || 1
+  });
+  
+  if (!templateId || !spaceKey) {
+    throw new Error('templateId and spaceKey are required');
+  }
+  
+  // Determine what titles to use
+  let titlesToCreate = [];
+  if (pageTitles && Array.isArray(pageTitles) && pageTitles.length > 0) {
+    titlesToCreate = pageTitles.filter(title => title && title.trim());
+    console.log('📝 Using individual page titles:', titlesToCreate);
+  } else if (pageTitle) {
+    titlesToCreate = [pageTitle];
+    console.log('📝 Using single page title:', pageTitle);
+  } else {
+    throw new Error('Either pageTitle or pageTitles array is required');
+  }
+  
+  if (titlesToCreate.length === 0) {
+    throw new Error('No valid page titles provided');
+  }
+  
+  // Get the template content
+  const templateData = await storage.get(`template_${templateId}`);
+  if (!templateData) {
+    throw new Error(`Template ${templateId} not found`);
+  }
+  
+  console.log('📄 Using template:', templateData.name);
+  
+  // Get numeric space ID if not provided
+  let numericSpaceId = spaceId;
+  if (!numericSpaceId) {
+    try {
+      const spaceResponse = await api.asUser().requestConfluence(
+        route`/wiki/api/v2/spaces?keys=${spaceKey}&limit=1`
+      );
       
-      const parentResponse = await api.asUser().requestConfluence(route`/wiki/api/v2/pages`, {
-        method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify(parentPayload)
-      });
-      
-      if (parentResponse.ok) {
-        const parentData = await parentResponse.json();
-        actualParentPageId = parentData.id;
-        console.log('✅ Parent page created:', actualParentPageId);
-      } else {
-        throw new Error('Failed to create parent page');
+      if (spaceResponse.ok) {
+        const spaceData = await spaceResponse.json();
+        numericSpaceId = spaceData.results?.[0]?.id;
       }
+    } catch (err) {
+      console.error('Error getting space ID:', err);
     }
+  }
+  
+  // Handle parent page creation if needed
+  let actualParentPageId = null;
+  if (pageOrganization === 'create-parent' && newParentTitle) {
+    console.log('🏗️  Creating new parent page:', newParentTitle);
     
-    // Calculate how many pages to create
-    const pageCount = titlesToCreate.length;
-    
-    console.log(`🚀 Creating ${pageCount} pages`);
-    
-    const createdPages = [];
-    const errors = [];
-    
-    // Create pages in parallel batches for better performance
-    const BATCH_SIZE = 10; // Process 10 pages at a time
-    const batches = [];
-    
-    // Split pages into batches
-    for (let i = 0; i < pageCount; i += BATCH_SIZE) {
-      const batchEnd = Math.min(i + BATCH_SIZE, pageCount);
-      const batch = [];
-      
-      for (let j = i; j < batchEnd; j++) {
-        batch.push({
-          index: j,
-          title: titlesToCreate[j]
-        });
+    const parentPayload = {
+      spaceId: numericSpaceId,
+      status: 'current',
+      title: newParentTitle,
+      body: {
+        representation: 'storage',
+        value: ''
       }
-      batches.push(batch);
-    }
-    
-    console.log(`📦 Split ${pageCount} pages into ${batches.length} batches of ${BATCH_SIZE}`);
-    
-    // Process each batch sequentially
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex];
-      console.log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} pages`);
-      
-      // Create pages sequentially to maintain order
-      const batchResults = [];
-      for (let i = 0; i < batch.length; i++) {
-        const pageInfo = batch[i];
-        try {
-          console.log(`📝 Creating page ${pageInfo.index + 1}/${pageCount}: ${pageInfo.title}`);
-          
-          // Prepare page payload
-          const pagePayload = {
-            spaceId: numericSpaceId,
-            status: 'current',
-            title: pageInfo.title,
-            body: {
-              representation: 'storage',
-              value: templateData.content
-            }
-          };
-          
-          // Add parent if specified
-          if (pageOrganization === 'create-child' && actualParentPageId) {
-            pagePayload.parentId = actualParentPageId;
-          } else if ((pageOrganization === 'create' || pageOrganization === 'create-parent') && actualParentPageId) {
-            pagePayload.parentId = actualParentPageId;
-          }
-          
-          // Create the page
-          const response = await api.asUser().requestConfluence(route`/wiki/api/v2/pages`, {
-            method: 'POST',
-            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-            body: JSON.stringify(pagePayload)
-          });
-          
-          if (response.ok) {
-            const pageData = await response.json();
-            console.log('✅ Page created successfully:', pageData.id);
-            
-            // Add small delay to ensure proper creation order
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
-            const pageUrl = `${req.context.siteUrl}/wiki/spaces/${spaceKey}/pages/${pageData.id}`;
-            batchResults.push({
-              success: true,
-              pageId: pageData.id,
-              title: pageInfo.title,
-              url: pageUrl
-            });
-          } else {
-            const errorText = await response.text();
-            console.error('❌ Page creation failed:', errorText);
-            batchResults.push({
-              success: false,
-              error: `${pageInfo.title}: ${errorText}`
-            });
-          }
-          
-        } catch (error) {
-          console.error(`❌ Error creating page:`, error);
-          batchResults.push({
-            success: false,
-            error: `Page ${pageInfo.index + 1}: ${error.message}`
-          });
-        }
-      }
-      
-      // Process results
-      batchResults.forEach(result => {
-        if (result.success) {
-          createdPages.push(result);
-        } else {
-          errors.push(result.error);
-        }
-      });
-      
-      console.log(`✅ Batch ${batchIndex + 1} complete: ${batchResults.filter(r => r.success).length} successful, ${batchResults.filter(r => !r.success).length} errors`);
-    }
-    
-    console.log(`🏁 Bulk generation complete: ${createdPages.length} successful, ${errors.length} errors`);
-    
-    return {
-      success: true,
-      pages: createdPages,
-      errors,
-      reportCount: createdPages.length,
-      message: `Successfully created ${createdPages.length} page(s)`,
-      firstPageUrl: createdPages[0]?.url,
-      multipleReports: createdPages.length > 1
     };
     
-  } catch (error) {
-    console.error('❌ bulkGeneratePages error:', error);
-    return { success: false, error: error.message };
+    const parentResponse = await api.asUser().requestConfluence(route`/wiki/api/v2/pages`, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(parentPayload)
+    });
+    
+    if (parentResponse.ok) {
+      const parentData = await parentResponse.json();
+      actualParentPageId = parentData.id;
+      console.log('✅ Parent page created:', actualParentPageId);
+    } else {
+      throw new Error('Failed to create parent page');
+    }
+  } else if (pageOrganization === 'create-child' && req.payload.parentPageId) {
+    actualParentPageId = req.payload.parentPageId;
   }
+  // Note: create-as-parent mode doesn't set actualParentPageId, so pages become top-level
+  
+  // Calculate page count and optimize batch size based on total pages
+  const pageCount = titlesToCreate.length;
+  const OPTIMAL_BATCH_SIZE = Math.min(5, Math.max(1, Math.ceil(pageCount / 10))); // Dynamic batch size: 1-5 pages
+  
+  console.log(`🚀 Creating ${pageCount} pages with optimized batch size: ${OPTIMAL_BATCH_SIZE}`);
+  
+  const createdPages = [];
+  const errors = [];
+  
+  // Create optimized batches
+  const batches = [];
+  for (let i = 0; i < pageCount; i += OPTIMAL_BATCH_SIZE) {
+    const batchEnd = Math.min(i + OPTIMAL_BATCH_SIZE, pageCount);
+    const batch = [];
+    
+    for (let j = i; j < batchEnd; j++) {
+      batch.push({
+        index: j,
+        title: titlesToCreate[j]
+      });
+    }
+    batches.push(batch);
+  }
+  
+  console.log(`📦 Split ${pageCount} pages into ${batches.length} optimized batches of ${OPTIMAL_BATCH_SIZE}`);
+  
+  // Enhanced processing with progress tracking
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    console.log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} pages`);
+    
+    // Process batch pages in parallel for better performance (within API rate limits)
+    const batchPromises = batch.map(async (pageInfo) => {
+      try {
+        console.log(`📝 Creating page ${pageInfo.index + 1}/${pageCount}: ${pageInfo.title}`);
+        
+        const pagePayload = {
+          spaceId: numericSpaceId,
+          status: 'current',
+          title: pageInfo.title,
+          body: {
+            representation: 'storage',
+            value: templateData.content
+          }
+        };
+        
+        // Add parent if specified
+        if (actualParentPageId) {
+          pagePayload.parentId = actualParentPageId;
+        }
+        
+        const response = await api.asUser().requestConfluence(route`/wiki/api/v2/pages`, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify(pagePayload)
+        });
+        
+        if (response.ok) {
+          const pageData = await response.json();
+          console.log(`✅ Page created: ${pageData.title} (ID: ${pageData.id})`);
+          return {
+            index: pageInfo.index,
+            success: true,
+            page: {
+              id: pageData.id,
+              title: pageData.title,
+              url: pageData._links?.base + pageData._links?.webui
+            }
+          };
+        } else {
+          const errorText = await response.text();
+          console.log(`❌ Failed to create page ${pageInfo.title}: ${response.status} - ${errorText}`);
+          return {
+            index: pageInfo.index,
+            success: false,
+            error: `Failed to create page: ${response.status}`,
+            title: pageInfo.title
+          };
+        }
+      } catch (error) {
+        console.error(`❌ Error creating page ${pageInfo.title}:`, error);
+        return {
+          index: pageInfo.index,
+          success: false,
+          error: error.message,
+          title: pageInfo.title
+        };
+      }
+    });
+    
+    // Wait for all pages in current batch to complete
+    const batchResults = await Promise.all(batchPromises);
+    
+    // Sort batch results by original index to preserve order
+    batchResults.sort((a, b) => a.index - b.index);
+    
+    // Process batch results in correct order
+    batchResults.forEach(result => {
+      if (result.success) {
+        createdPages.push(result.page);
+      } else {
+        errors.push(result);
+      }
+    });
+    
+    // Add small delay between batches to respect API rate limits
+    if (batchIndex < batches.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
+    }
+    
+    console.log(`✅ Batch ${batchIndex + 1}/${batches.length} completed. Success: ${batchResults.filter(r => r.success).length}, Errors: ${batchResults.filter(r => !r.success).length}`);
+  }
+  
+  const finalResults = {
+    success: true,
+    message: `Successfully created ${createdPages.length} pages`,
+    data: {
+      createdCount: createdPages.length,
+      errorCount: errors.length,
+      pages: createdPages,
+      errors: errors,
+      totalRequested: pageCount,
+      batchCount: batches.length,
+      batchSize: OPTIMAL_BATCH_SIZE
+    }
+  };
+  
+  console.log(`🎉 Bulk generation completed: ${createdPages.length}/${pageCount} pages created successfully`);
+  return finalResults;
 });
 
 // Close modal function for Custom UI

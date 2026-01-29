@@ -59,21 +59,6 @@ const BulkPageCloner = () => {
   const [generating, setGenerating] = useState(false);
   const [generationSuccess, setGenerationSuccess] = useState(null);
 
-  // Progress tracking for bulk generation
-  const [generationProgress, setGenerationProgress] = useState({
-    current: 0,
-    total: 0,
-    percentage: 0,
-    currentBatch: 0,
-    totalBatches: 0,
-    status: 'idle' // 'idle', 'generating', 'completed', 'error'
-  });
-
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25); // Default 25 items per page
-  const [totalPages, setTotalPages] = useState(0);
-
 
 
   // Load all pages and check context on component mount
@@ -215,21 +200,12 @@ const BulkPageCloner = () => {
       }
     
       setFilteredPages(filtered);
-      
-      // Update pagination when filters change
-      const newTotalPages = Math.ceil(filtered.length / pageSize);
-      setTotalPages(newTotalPages);
-      
-      // Reset to first page if current page exceeds new total
-      if (currentPage > newTotalPages && newTotalPages > 0) {
-        setCurrentPage(1);
-      }
     }, 250); // Optimized 250ms debounce
     
     debouncedFilter();
-  }, [allPages, searchQuery, selectedSpaceFilter, pageSize, currentPage]);
+  }, [allPages, searchQuery, selectedSpaceFilter]);
 
-  // Memoize paginated page rows for optimal performance
+  // Memoize page rows for better performance - only recalculate when filtered pages change
   const renderedPageRows = useMemo(() => {
     if (filteredPages.length === 0) {
       return (
@@ -249,12 +225,8 @@ const BulkPageCloner = () => {
       );
     }
     
-    // Calculate pagination slice
-    const startIndex = (currentPage - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    const paginatedPages = filteredPages.slice(startIndex, endIndex);
-    
-    return paginatedPages.map((page) => (
+    // Show first 50 pages for performance
+    return filteredPages.slice(0, 50).map((page) => (
       <tr key={page.id} style={{ borderBottom: '1px solid #F4F5F7' }}>
         <td style={{ 
           padding: '12px', 
@@ -303,7 +275,7 @@ const BulkPageCloner = () => {
         </td>
       </tr>
     ));
-  }, [filteredPages, searchQuery, selectedSpaceFilter, loading, currentPage, pageSize]);
+  }, [filteredPages, searchQuery, selectedSpaceFilter, loading]);
 
   // Handle page selection for template (Step 1)
   const handlePageSelect = async (page) => {
@@ -385,13 +357,11 @@ const BulkPageCloner = () => {
       return;
     }
     
-    if (pageOrganization === 'create-parent' && !newParentTitle.trim()) {
-      devLog('Validation failed: create-parent mode but no parent title');
+    if (pageOrganization === 'create' && !newParentTitle.trim()) {
+      devLog('Validation failed: create mode but no parent title');
       setError('Please enter a title for the new parent page');
       return;
     }
-    
-    // Note: create-as-parent mode doesn't need newParentTitle since each report becomes its own parent page
     
     if (!selectedTemplate?.id) {
       setError('Please select a template page first');
@@ -413,20 +383,9 @@ const BulkPageCloner = () => {
     setError('');
     setGenerating(true);
     
-    // Initialize progress tracking
-    const totalPages = deduplicatedTitles.length;
-    setGenerationProgress({
-      current: 0,
-      total: totalPages,
-      percentage: 0,
-      currentBatch: 0,
-      totalBatches: Math.ceil(totalPages / 5), // Assuming 5 pages per batch
-      status: 'generating'
-    });
-    
     try {
-      // Call the enhanced backend resolver with progress callback
-      const result = await invoke('bulkGeneratePagesWithProgress', {
+      // Call the backend resolver
+      const result = await invoke('bulkGeneratePages', {
         templateId: selectedTemplate.id,
         spaceKey: selectedSpace,
         pageTitle: deduplicatedTitles[0], // First title as base title
@@ -439,14 +398,12 @@ const BulkPageCloner = () => {
       });
       
       devLog('Pages generated successfully:', result);
-      setGenerationSuccess(result.data || result); // Handle both nested and direct data structures
-      setGenerationProgress(prev => ({ ...prev, status: 'completed', percentage: 100 }));
+      setGenerationSuccess(result);
       setCurrentStep(4);
       
     } catch (error) {
       devError('Failed to generate pages:', error);
       setError('Failed to create pages: ' + error.message);
-      setGenerationProgress(prev => ({ ...prev, status: 'error' }));
     } finally {
       setGenerating(false);
     }
@@ -660,11 +617,6 @@ const BulkPageCloner = () => {
       }
       setPageTitles(newTitles);
     }
-  };
-
-  const clearAllTitles = () => {
-    setPageTitles(new Array(pageCount).fill(''));
-    setShowAutofillSuggestion(false); // Also hide autofill suggestion when clearing
   };
 
   const applyNumberPattern = (newTitles, baseTitles) => {
@@ -997,7 +949,7 @@ const BulkPageCloner = () => {
 
         {/* Show Browse & Search by default (now primary option) */}
         {selectedOption === 'browse' && (
-        <>
+        <div>
         {/* Browse & Search Section */}
         <div style={{ 
           marginBottom: '20px',
@@ -1093,67 +1045,67 @@ const BulkPageCloner = () => {
             <div style={{ fontSize: '16px', marginBottom: '8px' }}>🔄 Loading pages...</div>
           </div>
         ) : (
-          <table style={{ 
-            border: '1px solid #DFE1E6', 
-            borderRadius: '3px', 
-            borderCollapse: 'collapse', 
-            width: '100%',
-            tableLayout: 'fixed'
-          }}>
-            <thead>
-              <tr style={{ 
-                backgroundColor: '#F4F5F7', 
-                borderBottom: '1px solid #DFE1E6' 
-              }}>
-                <th style={{ 
-                  padding: '12px', 
-                  textAlign: 'left', 
-                  fontWeight: '600', 
-                  color: '#000000', 
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
-                  width: '35%',
-                  wordWrap: 'break-word'
+          <div>
+            <table style={{ 
+              border: '1px solid #DFE1E6', 
+              borderRadius: '3px', 
+              borderCollapse: 'collapse', 
+              width: '100%',
+              tableLayout: 'fixed'
+            }}>
+              <thead>
+                <tr style={{ 
+                  backgroundColor: '#F4F5F7', 
+                  borderBottom: '1px solid #DFE1E6' 
                 }}>
-                  Page Title
-                </th>
-                <th style={{ 
-                  padding: '12px', 
-                  textAlign: 'left', 
-                  fontWeight: '600', 
-                  color: '#000000', 
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
-                  width: '30%'
-                }}>
-                  Space
-                </th>
-                <th style={{ 
-                  padding: '12px', 
-                  textAlign: 'left', 
-                  fontWeight: '600', 
-                  color: '#000000', 
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
-                  width: '20%'
-                }}>
-                  Last Modified
-                </th>
-                <th style={{ 
-                  padding: '12px', 
-                  textAlign: 'center', 
-                  fontWeight: '600', 
-                  color: '#000000', 
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
-                  width: '15%'
-                }}>
-                  Action
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {renderedPageRows}
-            </tbody>
-          </table>
-        )}
-        </>
+                  <th style={{ 
+                    padding: '12px', 
+                    textAlign: 'left', 
+                    fontWeight: '600', 
+                    color: '#000000', 
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
+                    width: '35%',
+                    wordWrap: 'break-word'
+                  }}>
+                    Page Title
+                  </th>
+                  <th style={{ 
+                    padding: '12px', 
+                    textAlign: 'left', 
+                    fontWeight: '600', 
+                    color: '#000000', 
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
+                    width: '30%'
+                  }}>
+                    Space
+                  </th>
+                  <th style={{ 
+                    padding: '12px', 
+                    textAlign: 'left', 
+                    fontWeight: '600', 
+                    color: '#000000', 
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
+                    width: '20%'
+                  }}>
+                    Last Modified
+                  </th>
+                  <th style={{ 
+                    padding: '12px', 
+                    textAlign: 'center', 
+                    fontWeight: '600', 
+                    color: '#000000', 
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
+                    width: '15%'
+                  }}>
+                    Action
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {renderedPageRows}
+              </tbody>
+            </table>
+          </div>
         )}
 
         {/* Show URL input only when URL option is selected */}
@@ -1211,8 +1163,6 @@ const BulkPageCloner = () => {
               {loadingPages ? '🔄 Loading...' : '🔍 Load from URL'}
             </button>
           )}
-        </div>
-        )}
         </div>
       )}
       
@@ -1334,7 +1284,7 @@ const BulkPageCloner = () => {
                   />
                   <div>
                     <div style={{ fontWeight: '600', color: '#000000', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
-                      📁 Create child(s) page under an existing page
+                      📁 Create child(s) page under an existing parent page
                     </div>
                     <div style={{ fontSize: '13px', color: 'black', marginTop: '4px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' }}>
                       Select an existing page to organize your reports underneath it
@@ -1349,8 +1299,8 @@ const BulkPageCloner = () => {
                   <input
                     type="radio"
                     name="pageOrganization"
-                    value="create-as-parent"
-                    checked={pageOrganization === 'create-as-parent'}
+                    value="create-parent"
+                    checked={pageOrganization === 'create-parent'}
                     onChange={(e) => {
                       devLog('Radio changed to:', e.target.value);
                       setPageOrganization(e.target.value);
@@ -1374,8 +1324,8 @@ const BulkPageCloner = () => {
                   <input
                     type="radio"
                     name="pageOrganization"
-                    value="create-parent"
-                    checked={pageOrganization === 'create-parent'}
+                    value="create"
+                    checked={pageOrganization === 'create'}
                     onChange={(e) => setPageOrganization(e.target.value)}
                     style={{ marginTop: '3px' }}
                   />
@@ -1448,8 +1398,8 @@ const BulkPageCloner = () => {
             </div>
           )}
           
-          {/* New Parent Page Title (only for create-parent mode where we create a single parent with children) */}
-          {selectedSpace && pageOrganization === 'create-parent' && (
+          {/* New Parent Page Title (only for create mode) */}
+          {selectedSpace && pageOrganization === 'create' && (
             <div style={{
               backgroundColor: '#E6FCFF',
               padding: '20px',
@@ -1520,7 +1470,7 @@ const BulkPageCloner = () => {
               disabled={generating || !selectedSpace || 
                 !pageOrganization ||
                 (pageOrganization === 'create-child' && !selectedParentPage) ||
-                (pageOrganization === 'create-parent' && !newParentTitle.trim()) ||
+                (pageOrganization === 'create' && !newParentTitle.trim()) ||
                 !selectedTemplate?.id ||
                 !pageTitles.some(title => title.trim())
               }
@@ -1529,7 +1479,7 @@ const BulkPageCloner = () => {
                 backgroundColor: (generating || !selectedSpace || 
                   !pageOrganization ||
                   (pageOrganization === 'create-child' && !selectedParentPage) ||
-                  (pageOrganization === 'create-parent' && !newParentTitle.trim()) ||
+                  (pageOrganization === 'create' && !newParentTitle.trim()) ||
                   !selectedTemplate?.id ||
                   !pageTitles.some(title => title.trim())) 
                   ? '#DFE1E6' : '#0052CC',
@@ -1541,69 +1491,15 @@ const BulkPageCloner = () => {
                 cursor: (generating || !selectedSpace || 
                   !pageOrganization ||
                   (pageOrganization === 'create-child' && !selectedParentPage) ||
-                  (pageOrganization === 'create-parent' && !newParentTitle.trim()) ||
+                  (pageOrganization === 'create' && !newParentTitle.trim()) ||
                   !selectedTemplate?.id ||
                   !pageTitles.some(title => title.trim())) 
                   ? 'not-allowed' : 'pointer',
                 fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
               }}
             >
-              {generating ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                  <span>Creating Pages...</span>
-                  {generationProgress.total > 0 && (
-                    <span>({generationProgress.current}/{generationProgress.total})</span>
-                  )}
-                </div>
-              ) : 'Create Pages'}
+              {generating ? 'Creating Pages...' : 'Create Pages'}
             </button>
-
-            {/* Enhanced Progress Display for Bulk Operations */}
-            {generating && generationProgress.total > 1 && (
-              <div style={{
-                marginTop: '20px',
-                padding: '16px',
-                backgroundColor: '#F8F9FA',
-                border: '1px solid #DFE1E6',
-                borderRadius: '6px'
-              }}>
-                <div style={{
-                  marginBottom: '8px',
-                  fontWeight: '600',
-                  color: '#0052CC',
-                  fontSize: '14px'
-                }}>
-                  🚀 Creating {generationProgress.total} pages in optimized batches
-                </div>
-                
-                {/* Progress Bar */}
-                <div style={{
-                  width: '100%',
-                  height: '8px',
-                  backgroundColor: '#DFE1E6',
-                  borderRadius: '4px',
-                  overflow: 'hidden',
-                  marginBottom: '8px'
-                }}>
-                  <div style={{
-                    height: '100%',
-                    backgroundColor: '#00B8D9',
-                    width: `${generationProgress.percentage}%`,
-                    transition: 'width 0.3s ease-in-out'
-                  }} />
-                </div>
-                
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  fontSize: '12px',
-                  color: '#6B778C'
-                }}>
-                  <span>Pages: {generationProgress.current}/{generationProgress.total}</span>
-                  <span>{Math.round(generationProgress.percentage)}% Complete</span>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -1698,44 +1594,22 @@ const BulkPageCloner = () => {
               }}>
                 ✏️ Name your pages
               </label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {/* Clear All Titles Button */}
-                <button
-                  onClick={clearAllTitles}
-                  style={{
-                    padding: '6px 12px',
-                    backgroundColor: 'transparent',
-                    color: '#DE350B',
-                    border: '1px solid #DE350B',
-                    borderRadius: '3px',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
-                  }}
-                  disabled={!pageTitles.some(title => title.trim())}
-                >
-                  🗑️ Clear All
-                </button>
-                {/* Copy First Title Button - Hidden when autofill suggestion is shown */}
-                {!showAutofillSuggestion && (
-                  <button
-                    onClick={copyFirstTitle}
-                    style={{
-                      padding: '6px 12px',
-                      backgroundColor: '#0052CC',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '3px',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
-                    }}
-                    disabled={!pageTitles[0] || !pageTitles[0].trim()}
-                  >
-                    📋 Copy First Title to All
-                  </button>
-                )}
-              </div>
+              <button
+                onClick={copyFirstTitle}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: '#0052CC',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '3px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
+                }}
+                disabled={!pageTitles[0] || !pageTitles[0].trim()}
+              >
+                📋 Copy First Title to All
+              </button>
             </div>
             
             {/* Autofill Suggestion */}
@@ -1906,7 +1780,7 @@ const BulkPageCloner = () => {
               }}>
                 {generationSuccess && generationSuccess.pages && generationSuccess.pages.length > 0 
                   ? `${generationSuccess.pages.length} pages have been created successfully`
-                  : (generationSuccess && generationSuccess.createdCount ? `${generationSuccess.createdCount} pages have been created successfully` : 'Your pages have been created successfully')
+                  : 'Your pages have been created successfully'
                 }
               </p>
             </div>
