@@ -235,9 +235,9 @@ resolver.define('getAllPagesOptimized', async (req) => {
     
     console.log(`📊 Found ${spaces.length} spaces, loading pages...`);
     
-    // Now get pages from ALL spaces with unlimited pagination (up to 5000 pages)
+    // Now get pages from ALL spaces with unlimited pagination (up to 5,000 pages)
     const allPages = [];
-    const PAGE_LIMIT = 5000; // Limit to 5000 pages for performance
+    const PAGE_LIMIT = 5000; // Limit to 5,000 pages for performance
     
     console.log('📄 Fetching pages from all spaces...');
     for (const space of spaces) {
@@ -845,7 +845,7 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
   
   // Calculate page count and optimize batch size based on total pages
   const pageCount = titlesToCreate.length;
-  const OPTIMAL_BATCH_SIZE = Math.min(5, Math.max(1, Math.ceil(pageCount / 10))); // Dynamic batch size: 1-5 pages
+  const OPTIMAL_BATCH_SIZE = Math.min(10, Math.max(1, Math.ceil(pageCount / 5))); // Dynamic batch size: 1-10 pages
   
   console.log(`🚀 Creating ${pageCount} pages with optimized batch size: ${OPTIMAL_BATCH_SIZE}`);
   
@@ -914,11 +914,26 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
           };
         } else {
           const errorText = await response.text();
+          let errorMessage = `Failed to create page: ${response.status}`;
+
+          try {
+            const parsed = JSON.parse(errorText);
+            if (parsed?.message) {
+              errorMessage = parsed.message;
+            } else if (parsed?.errors?.length) {
+              errorMessage = parsed.errors.map(e => e.message || e.title || e).join('; ');
+            }
+          } catch (parseErr) {
+            // Non-JSON response; keep default message
+          }
+
           console.log(`❌ Failed to create page ${pageInfo.title}: ${response.status} - ${errorText}`);
           return {
             index: pageInfo.index,
             success: false,
-            error: `Failed to create page: ${response.status}`,
+            status: response.status,
+            error: errorMessage,
+            errorDetails: errorText,
             title: pageInfo.title
           };
         }
@@ -950,7 +965,7 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
     
     // Add small delay between batches to respect API rate limits
     if (batchIndex < batches.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
+      await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay
     }
     
     console.log(`✅ Batch ${batchIndex + 1}/${batches.length} completed. Success: ${batchResults.filter(r => r.success).length}, Errors: ${batchResults.filter(r => !r.success).length}`);

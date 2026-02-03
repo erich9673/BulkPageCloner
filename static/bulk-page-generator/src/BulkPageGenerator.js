@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { invoke, router } from '@forge/bridge';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { invoke, router, view } from '@forge/bridge';
 
 // Production logging control
 const IS_DEV = process.env.NODE_ENV === 'development';
@@ -74,7 +74,56 @@ const BulkPageCloner = () => {
   const [pageSize, setPageSize] = useState(25); // Default 25 items per page
   const [totalPages, setTotalPages] = useState(0);
 
+  // Track if app is opened via macro (for close functionality, but not modal styling)
+  const [isMacro, setIsMacro] = useState(false);
+  
+  // Ref for click-outside detection
+  const containerRef = useRef(null);
 
+  // Handle close for macro entry point
+  const handleClose = useCallback(async () => {
+    try {
+      await view.close();
+    } catch (err) {
+      devError('Error closing app:', err);
+    }
+  }, []);
+
+  // ESC key handling for macro context
+  useEffect(() => {
+    if (!isMacro) return;
+    
+    const handleKeyPress = (event) => {
+      if (event.key === 'Escape') {
+        handleClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyPress);
+    
+    // Ensure the container gets focus immediately for macro context
+    if (containerRef.current) {
+      containerRef.current.focus();
+    }
+    
+    return () => document.removeEventListener('keydown', handleKeyPress);
+  }, [handleClose, isMacro]);
+
+  // Close when focus leaves the iframe (clicking outside in the editor UI)
+  useEffect(() => {
+    if (!isMacro) return;
+
+    const handleWindowBlur = () => {
+      // Only close when the page is still visible (avoid closing on tab switch)
+      if (document.visibilityState === 'visible') {
+        devLog('Window blur detected, closing macro');
+        handleClose();
+      }
+    };
+
+    window.addEventListener('blur', handleWindowBlur);
+    return () => window.removeEventListener('blur', handleWindowBlur);
+  }, [handleClose, isMacro]);
 
   // Load all pages and check context on component mount
   useEffect(() => {
@@ -82,7 +131,42 @@ const BulkPageCloner = () => {
     const load = async () => {
       if (!mounted) return;
 
-      // Context detection removed as it's not used
+      // Detect if this is a macro entry point for close functionality
+      try {
+        // Use Forge view context to reliably detect macro context
+        const context = await view.getContext();
+        const isFromMacro = context?.extension?.type === 'macro' || 
+                           context?.moduleKey?.includes('macro') ||
+                           context?.type === 'macro';
+        
+        // Fallback to URL detection if context is unavailable
+        if (!isFromMacro) {
+          const currentUrl = window.location.href;
+          const urlBasedDetection = currentUrl.includes('macro') || 
+                                   currentUrl.includes('bulkpage') ||
+                                   window.location.search.includes('macro');
+          setIsMacro(urlBasedDetection);
+          devLog('Macro context detected via URL:', urlBasedDetection);
+        } else {
+          setIsMacro(isFromMacro);
+          devLog('Macro context detected via Forge context:', isFromMacro);
+        }
+      } catch (err) {
+        devError('Error detecting entry point:', err);
+        // Fallback to URL-based detection
+        try {
+          const currentUrl = window.location.href;
+          const urlBasedDetection = currentUrl.includes('macro') || 
+                                   currentUrl.includes('bulkpage') ||
+                                   window.location.search.includes('macro');
+          setIsMacro(urlBasedDetection);
+          devLog('Macro context detected via fallback URL:', urlBasedDetection);
+        } catch (fallbackErr) {
+          devError('Fallback detection failed:', fallbackErr);
+          setIsMacro(false);
+        }
+      }
+
       await loadAllPages();
     };
 
@@ -857,15 +941,56 @@ const BulkPageCloner = () => {
   };
 
   return (
-    <div style={{ 
-      padding: '20px', 
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
-      width: '100%',
-      maxWidth: 'none',
-      boxSizing: 'border-box',
-      overflowX: 'hidden',
-      position: 'relative'
-    }}>
+    <div 
+      style={{ 
+        padding: '20px',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
+        width: '100%',
+        maxWidth: 'none',
+        boxSizing: 'border-box',
+        overflowX: 'hidden',
+        position: 'relative',
+        minHeight: 'auto',
+        backgroundColor: 'transparent',
+        display: 'block'
+      }}
+    >
+      {/* Invisible backdrop for macro context to catch outside clicks */}
+      {isMacro && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 1,
+            backgroundColor: 'transparent',
+            cursor: 'default'
+          }}
+          onClick={() => {
+            devLog('Backdrop clicked, closing macro');
+            handleClose();
+          }}
+        />
+      )}
+      <div 
+        ref={containerRef}
+        tabIndex={isMacro ? 0 : -1} // Make focusable for macro context
+        style={{
+          backgroundColor: 'white',
+          padding: '20px',
+          borderRadius: '0',
+          boxShadow: 'none',
+          width: '100%',
+          maxWidth: 'none',
+          maxHeight: 'none',
+          overflowY: 'visible',
+          outline: 'none', // Remove focus outline to prevent blue highlighting
+          position: 'relative',
+          zIndex: isMacro ? 2 : 1 // Keep content above backdrop
+        }}
+      >
       
       {/* Messages */}
       {error && (
@@ -885,10 +1010,10 @@ const BulkPageCloner = () => {
       {/* Step 1: Select Page as Template */}
       {currentStep === 1 && (
         <div style={{ 
-          backgroundColor: 'white', 
+          backgroundColor: 'transparent', 
           padding: '20px', 
-          borderRadius: '3px', 
-          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          borderRadius: '0', 
+          boxShadow: 'none',
           width: '100%',
           boxSizing: 'border-box',
           overflowX: 'auto'
@@ -1006,23 +1131,38 @@ const BulkPageCloner = () => {
           border: '1px solid #DFE1E6',
           borderRadius: '6px'
         }}>
-          <label style={{ 
-            display: 'block', 
-            marginBottom: '8px', 
-            fontWeight: '600', 
-            color: '#0052CC', 
-            fontSize: '15px',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            marginBottom: '8px'
           }}>
-            🔍 Search Pages
-          </label>
+            <label style={{ 
+              display: 'block', 
+              fontWeight: '600', 
+              color: '#0052CC', 
+              fontSize: '15px',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif' 
+            }}>
+              🔍 Search Pages
+            </label>
+            <span style={{
+              color: '#DE350B',
+              fontSize: '12px',
+              fontWeight: '600',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
+            }}>
+              If you can't find a page, please use 🔗 Paste URL
+            </span>
+          </div>
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search page titles, spaces, or URLs..."
+            placeholder="Search page titles"
             style={{
               width: '100%',
+              boxSizing: 'border-box',
               padding: '8px 12px',
               border: '1px solid #DFE1E6',
               borderRadius: '3px',
@@ -1219,10 +1359,10 @@ const BulkPageCloner = () => {
       {/* Step 3: Location Selection */}
       {currentStep === 3 && (
         <div style={{ 
-          backgroundColor: 'white', 
+          backgroundColor: 'transparent', 
           padding: '20px', 
-          borderRadius: '3px', 
-          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          borderRadius: '0', 
+          boxShadow: 'none',
           width: '100%',
           boxSizing: 'border-box',
           overflowX: 'auto'
@@ -1481,6 +1621,8 @@ const BulkPageCloner = () => {
                 placeholder="e.g., Q3 2025 Reports"
                 style={{
                   width: '100%',
+                  maxWidth: '100%',
+                  boxSizing: 'border-box',
                   padding: '8px 12px',
                   border: '1px solid #00B8D9',
                   borderRadius: '3px',
@@ -1611,10 +1753,10 @@ const BulkPageCloner = () => {
       {/* Step 2: Bulk Generation */}
       {currentStep === 2 && (
         <div style={{ 
-          backgroundColor: 'white', 
+          backgroundColor: 'transparent', 
           padding: '20px', 
-          borderRadius: '3px', 
-          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          borderRadius: '0', 
+          boxShadow: 'none',
           width: '100%',
           boxSizing: 'border-box',
           overflowX: 'auto'
@@ -1912,6 +2054,46 @@ const BulkPageCloner = () => {
             </div>
           </div>
           
+          {/* Errors Summary */}
+          {generationSuccess && generationSuccess.errors && generationSuccess.errors.length > 0 && (
+            <div style={{
+              marginTop: '16px',
+              padding: '16px',
+              backgroundColor: '#FFEBE6',
+              borderRadius: '3px',
+              border: '1px solid #FF8F73'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginBottom: '8px'
+              }}>
+                <span style={{ fontSize: '18px', color: '#BF2600' }}>⚠️</span>
+                <strong style={{
+                  color: '#BF2600',
+                  fontSize: '14px',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
+                }}>
+                  {generationSuccess.errors.length} pages failed to create
+                </strong>
+              </div>
+              <ul style={{
+                margin: 0,
+                paddingLeft: '18px',
+                color: '#BF2600',
+                fontSize: '13px',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif'
+              }}>
+                {generationSuccess.errors.map((err, idx) => (
+                  <li key={idx} style={{ marginBottom: '6px' }}>
+                    <strong>"{err.title}"</strong> — {err.error || 'Unknown error'}{err.status ? ` (Status ${err.status})` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Created Pages List */}
           {generationSuccess && generationSuccess.pages && generationSuccess.pages.length > 0 ? (
             <div style={{
@@ -2027,6 +2209,7 @@ const BulkPageCloner = () => {
           </button>
         </div>
       )}
+      </div>
     </div>
   );
 };
