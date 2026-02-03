@@ -843,134 +843,107 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
   }
   // Note: create-as-parent mode doesn't set actualParentPageId, so pages become top-level
   
-  // Calculate page count and optimize batch size based on total pages
+  // Calculate page count
   const pageCount = titlesToCreate.length;
-  const OPTIMAL_BATCH_SIZE = Math.min(10, Math.max(1, Math.ceil(pageCount / 5))); // Dynamic batch size: 1-10 pages
-  
-  console.log(`🚀 Creating ${pageCount} pages with optimized batch size: ${OPTIMAL_BATCH_SIZE}`);
-  
+  console.log(`🚀 Creating ${pageCount} pages sequentially to preserve order`);
+
   const createdPages = [];
   const errors = [];
-  
-  // Create optimized batches
-  const batches = [];
-  for (let i = 0; i < pageCount; i += OPTIMAL_BATCH_SIZE) {
-    const batchEnd = Math.min(i + OPTIMAL_BATCH_SIZE, pageCount);
-    const batch = [];
-    
-    for (let j = i; j < batchEnd; j++) {
-      batch.push({
-        index: j,
-        title: titlesToCreate[j]
+
+  // Sequential creation to guarantee order in Confluence tree
+  for (let i = 0; i < pageCount; i++) {
+    const title = titlesToCreate[i];
+    try {
+      console.log(`📝 Creating page ${i + 1}/${pageCount}: ${title}`);
+
+      const pagePayload = {
+        spaceId: numericSpaceId,
+        status: 'current',
+        title: title,
+        body: {
+          representation: 'storage',
+          value: templateData.content
+        }
+      };
+
+      if (actualParentPageId) {
+        pagePayload.parentId = actualParentPageId;
+      }
+
+      const response = await api.asUser().requestConfluence(route`/wiki/api/v2/pages`, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(pagePayload)
+      });
+
+      if (response.ok) {
+        const pageData = await response.json();
+        const created = {
+          id: pageData.id,
+          title: pageData.title,
+          url: pageData._links?.base + pageData._links?.webui
+        };
+        createdPages.push(created);
+        console.log(`✅ Page created: ${pageData.title} (ID: ${pageData.id})`);
+
+        // Immediately move after previous page to enforce ordering
+        if (createdPages.length > 1) {
+          const previousPage = createdPages[createdPages.length - 2];
+          try {
+            const moveResp = await api.asUser().requestConfluence(
+              route`/wiki/rest/api/content/${created.id}/move/after/${previousPage.id}`,
+              {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' }
+              }
+            );
+            if (!moveResp.ok) {
+              const moveErrorText = await moveResp.text();
+              console.error(`❌ Failed to order page ${created.title}: ${moveResp.status} - ${moveErrorText}`);
+            }
+          } catch (moveError) {
+            console.error(`❌ Failed to order page ${created.title}:`, moveError);
+          }
+        }
+      } else {
+        const errorText = await response.text();
+        let errorMessage = `Failed to create page: ${response.status}`;
+
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed?.message) {
+            errorMessage = parsed.message;
+          } else if (parsed?.errors?.length) {
+            errorMessage = parsed.errors.map(e => e.message || e.title || e).join('; ');
+          }
+        } catch (parseErr) {
+          // Non-JSON response; keep default message
+        }
+
+        console.log(`❌ Failed to create page ${title}: ${response.status} - ${errorText}`);
+        errors.push({
+          index: i,
+          success: false,
+          status: response.status,
+          error: errorMessage,
+          errorDetails: errorText,
+          title: title
+        });
+      }
+    } catch (error) {
+      console.error(`❌ Error creating page ${title}:`, error);
+      errors.push({
+        index: i,
+        success: false,
+        error: error.message,
+        title: title
       });
     }
-    batches.push(batch);
-  }
-  
-  console.log(`📦 Split ${pageCount} pages into ${batches.length} optimized batches of ${OPTIMAL_BATCH_SIZE}`);
-  
-  // Enhanced processing with progress tracking
-  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-    const batch = batches[batchIndex];
-    console.log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} pages`);
-    
-    // Process batch pages in parallel for better performance (within API rate limits)
-    const batchPromises = batch.map(async (pageInfo) => {
-      try {
-        console.log(`📝 Creating page ${pageInfo.index + 1}/${pageCount}: ${pageInfo.title}`);
-        
-        const pagePayload = {
-          spaceId: numericSpaceId,
-          status: 'current',
-          title: pageInfo.title,
-          body: {
-            representation: 'storage',
-            value: templateData.content
-          }
-        };
-        
-        // Add parent if specified
-        if (actualParentPageId) {
-          pagePayload.parentId = actualParentPageId;
-        }
-        
-        const response = await api.asUser().requestConfluence(route`/wiki/api/v2/pages`, {
-          method: 'POST',
-          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify(pagePayload)
-        });
-        
-        if (response.ok) {
-          const pageData = await response.json();
-          console.log(`✅ Page created: ${pageData.title} (ID: ${pageData.id})`);
-          return {
-            index: pageInfo.index,
-            success: true,
-            page: {
-              id: pageData.id,
-              title: pageData.title,
-              url: pageData._links?.base + pageData._links?.webui
-            }
-          };
-        } else {
-          const errorText = await response.text();
-          let errorMessage = `Failed to create page: ${response.status}`;
 
-          try {
-            const parsed = JSON.parse(errorText);
-            if (parsed?.message) {
-              errorMessage = parsed.message;
-            } else if (parsed?.errors?.length) {
-              errorMessage = parsed.errors.map(e => e.message || e.title || e).join('; ');
-            }
-          } catch (parseErr) {
-            // Non-JSON response; keep default message
-          }
-
-          console.log(`❌ Failed to create page ${pageInfo.title}: ${response.status} - ${errorText}`);
-          return {
-            index: pageInfo.index,
-            success: false,
-            status: response.status,
-            error: errorMessage,
-            errorDetails: errorText,
-            title: pageInfo.title
-          };
-        }
-      } catch (error) {
-        console.error(`❌ Error creating page ${pageInfo.title}:`, error);
-        return {
-          index: pageInfo.index,
-          success: false,
-          error: error.message,
-          title: pageInfo.title
-        };
-      }
-    });
-    
-    // Wait for all pages in current batch to complete
-    const batchResults = await Promise.all(batchPromises);
-    
-    // Sort batch results by original index to preserve order
-    batchResults.sort((a, b) => a.index - b.index);
-    
-    // Process batch results in correct order
-    batchResults.forEach(result => {
-      if (result.success) {
-        createdPages.push(result.page);
-      } else {
-        errors.push(result);
-      }
-    });
-    
-    // Add small delay between batches to respect API rate limits
-    if (batchIndex < batches.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay
-    }
-    
-    console.log(`✅ Batch ${batchIndex + 1}/${batches.length} completed. Success: ${batchResults.filter(r => r.success).length}, Errors: ${batchResults.filter(r => !r.success).length}`);
+    // Small delay to avoid rate limits and allow ordering to settle
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
-  
+
   const finalResults = {
     success: true,
     message: `Successfully created ${createdPages.length} pages`,
@@ -980,8 +953,8 @@ resolver.define('bulkGeneratePagesWithProgress', async (req) => {
       pages: createdPages,
       errors: errors,
       totalRequested: pageCount,
-      batchCount: batches.length,
-      batchSize: OPTIMAL_BATCH_SIZE
+      batchCount: 1,
+      batchSize: 1
     }
   };
   

@@ -1637,7 +1637,7 @@ const BulkPageCloner = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '24px' }}>
             <button
               onClick={() => {
-                setCurrentStep(3);
+                setCurrentStep(2);
                 setError('');
               }}
               style={{
@@ -1652,7 +1652,7 @@ const BulkPageCloner = () => {
                 textDecoration: 'underline'
               }}
             >
-              ← Select Page as Template
+              ← Back to Bulk Cloning
             </button>
             <button
               onClick={() => {
